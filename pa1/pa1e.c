@@ -14,7 +14,7 @@
 #include "aux.h"
 #include "umix.h"
 
-#define NUMPROCS 3
+#define NUMPROCS 9
 
 void handoff(int p);
 
@@ -30,21 +30,21 @@ void Main()
 			Printf("%d exiting\n", Getpid());
 			Exit();
 		}
-		Printf("%d just forked %d\n", Getpid(), c);
+		Printf("%d just forked %d, now p is %d\n", Getpid(), c, p);
 	}
 
 	Printf("%d yielding to %d\n", Getpid(), c);
 	r = Yield(c);
-	Printf("%d resumed by %d, yielding to %d\n", Getpid(), r, c);
+	Printf("In parent, %d resumed by %d, yielding to %d\n", Getpid(), r, c);
 	Yield(c);
-	Printf("%d exiting\n", Getpid());
+	Printf("Parent %d exiting\n", Getpid());
 }
 
 void handoff(p)
 	int p;				// process to yield to
 {
 	int r;
-
+    Printf("handoff start with p:%d\n", p);
 	Printf("%d yielding to %d\n", Getpid(), p);
 	r = Yield(p);
 	Printf("%d resumed by %d, yielding to %d\n", Getpid(), r, p);

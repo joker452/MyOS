@@ -27,9 +27,7 @@ void Main()
 		Exit();
 	}
 
-	Printf("I am the parent, my pid is %d\n", Getpid());
 	Printf("I just created a child process whose pid is %d\n", pid);
-
 	if ((pid = Fork()) == 0) {
 
 		/* second child executes here */
@@ -39,5 +37,6 @@ void Main()
 
 	/* HERE */
 
+	Printf("I am the parent, my pid is %d\n", Getpid());
 	Printf("I (the parent) just created a second child process whose pid is %d\n", pid);
 }

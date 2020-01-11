@@ -77,7 +77,7 @@ void Main()
 
 		/* child executes here */
 		Printf("I am the child, my pid is %d\n", Getpid());
-		Exit();
+        Exit();
 	}
 
 	Printf("I am the parent, my pid is %d\n", Getpid());
