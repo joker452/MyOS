@@ -47,18 +47,22 @@ void NewContext(int p, CONTEXT *c)
 int MySwitchContext(int p)
 	// p: ID of process to switch to
 {
-    int magic = 0;
-    int retPid;
-	int curPid = GetCurProc();
-    CONTEXT ctxt = ctxts[curPid - 1];
-    SaveContext(&ctxt);
-    if (magic == 0) {
-        magic = 1;
-        lastPid = curPid;
-        RestoreContext(&ctxts[p - 1]);
+    if (p > 0 && p <= MAXPROCS) {
+        int magic = 0;
+        int retPid;
+	    int curPid = GetCurProc();
+        CONTEXT ctxt = ctxts[curPid - 1];
+        SaveContext(&ctxt);
+        if (magic == 0) {
+            magic = 1;
+            lastPid = curPid;
+            RestoreContext(&ctxts[p - 1]);
+        } else {
+            retPid = lastPid;
+            lastPid = curPid;
+        }
+        return retPid;
     } else {
-        retPid = lastPid;
-        lastPid = curPid;
+        return -1;
     }
-    return retPid;
 }
