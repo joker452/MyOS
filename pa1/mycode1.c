@@ -51,8 +51,7 @@ int MySwitchContext(int p)
         int magic = 0;
         int retPid;
 	    int curPid = GetCurProc();
-        CONTEXT ctxt = ctxts[curPid - 1];
-        SaveContext(&ctxt);
+        SaveContext(&ctxts[curPid - 1]);
         if (magic == 0) {
             magic = 1;
             lastPid = curPid;
