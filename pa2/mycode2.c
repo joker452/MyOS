@@ -10,7 +10,7 @@
 #include "sys.h"
 #include "mycode2.h"
 
-#define TIMERINTERVAL 100000	// in ticks (tick = 10 msec)
+#define TIMERINTERVAL 1	// in ticks (tick = 10 msec)
 
 /* 	A sample process table. You may change this any way you wish. 
  */
@@ -22,6 +22,8 @@ static struct {
 
 
 static int bd_front, bd_end;
+static int lastProc;
+static int size;
 
 /* 	InitSched() is called when the kernel starts up. First, set the
  * 	scheduling policy (see sys.h). Make sure you follow the rules
@@ -50,16 +52,18 @@ void InitSched()
 	 */
 	if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
 							// no other code here
-		SetSchedPolicy(ARBITRARY);		// set policy here
+		SetSchedPolicy(ROUNDROBIN);		// set policy here
 							// no other code here
 	}
 		
 	/* Initialize all your data structures here */
 	for (i = 0; i < MAXPROCS; i++) {
 		proctab[i].valid = 0;
-		bd_front = bd_end = 0;
 	}
 
+	bd_front = bd_end = 0;
+	lastProc = -1;
+	size = 0;
 	/* Set the timer last */
 	SetTimer(TIMERINTERVAL);
 }
@@ -75,17 +79,26 @@ int StartingProc(int p)
 	// p: process that is starting
 {
 	int i;
-	// DPrintf("start %d\n", p);
+	DPrintf("%d start \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		case LIFO:
-			if ((bd_end - bd_front + MAXPROCS + 1) % (MAXPROCS + 1) != MAXPROCS) {
+			if (size != MAXPROCS) {
 				proctab[bd_end].pid = p;
 				bd_end = (bd_end + 1) % (MAXPROCS + 1);
 				DoSched();
+				++size;
 				return 1;
 			}
 			break;
+		case ROUNDROBIN:
+			if (size != MAXPROCS) {
+				proctab[bd_end].pid = p;
+				bd_end = (bd_end + 1) % (MAXPROCS + 1);
+				++size;
+				return 1;
+			}
+			break;			
 		default:
 			for (i = 0; i < MAXPROCS; i++) {
 				if (! proctab[i].valid) {
@@ -113,23 +126,32 @@ int EndingProc(int p)
 	// p: process that is ending
 {
 	int i;
-	// DPrintf("end %d\n", p);
+	DPrintf("%d end \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		/* Ending should always begin from front */
-			if (bd_end != bd_front && proctab[bd_front].pid == p) {
+			if (size > 0 && proctab[bd_front].pid == p) {
 				proctab[bd_front].pid = 0;
 				bd_front = (bd_front + 1) % (MAXPROCS + 1);
+				--size;
 				// DoSched();
 				return 1;
 			}
 			break;
 		case LIFO:
 		/* Ending should always begin from end */
-			if (bd_end != bd_front && proctab[(bd_end + MAXPROCS) % (MAXPROCS + 1)].pid == p) {
+			if (size > 0 && proctab[(bd_end + MAXPROCS) % (MAXPROCS + 1)].pid == p) {
 				proctab[(bd_end + MAXPROCS) % (MAXPROCS + 1)].pid = 0;
 				bd_end = (bd_end + MAXPROCS) % (MAXPROCS + 1);
+				--size;
 				// DoSched();
+				return 1;
+			}
+			break;
+		case ROUNDROBIN:
+			if (size > 0 && lastProc == p) {
+				lastProc = -1;
+				--size;
 				return 1;
 			}
 			break;
@@ -157,7 +179,7 @@ int EndingProc(int p)
 
 int SchedProc()
 {
-	// DPrintf("schedule\n");
+	// DPrintf("schedule, ");
 	int i;
 	switch(GetSchedPolicy()) {
 
@@ -173,21 +195,32 @@ int SchedProc()
 
 	case FIFO:
 		/* schedule from font */
-		if (bd_end != bd_front) {
+		if (size > 0) {
 			return proctab[bd_front].pid;
 		}
 		break;
 
 	case LIFO:
 		/* schedule from end */
-		if (bd_end != bd_front) {
+		if (size > 0) {
 			return proctab[(bd_end + MAXPROCS) % (MAXPROCS + 1)].pid;
 		}
 		break;
 	case ROUNDROBIN:
-
-		/* your code here */
-
+		// DPrintf("size: %d, ", size);
+		if (size > 0) {
+			if (lastProc > 0) {
+				/* schedule from interrupt */
+				// DPrintf("add %d, ", lastProc);
+				proctab[bd_end].pid = lastProc;
+				bd_end = (bd_end + 1) % (MAXPROCS + 1);
+			}
+			lastProc = proctab[bd_front].pid;
+			proctab[bd_front].pid = 0;
+			bd_front = (bd_front + 1) % (MAXPROCS + 1);
+			DPrintf("choose %d\n", lastProc);
+			return lastProc;
+		}
 		break;
 
 	case PROPORTIONAL:
@@ -232,7 +265,7 @@ void HandleTimerIntr()
  *  	0 and must be less than or equal to 100. MyRequestCPUrate(p, n)
  * 	should return 0 if successful, i.e., if such a request can be
  * 	satisfied, otherwise it should return -1, i.e., error (including
- * 	if n < 0 or n > 100). If MyRequestCPUrate(p, n) fails, it should
+ * 	if n < 0 or n > 100 or over allocation). If MyRequestCPUrate(p, n) fails, it should
  *   	have no effect on the scheduling of this or any other process,
  * 	i.e., AS IF IT WERE NEVER CALLED.
  */
