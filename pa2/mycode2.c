@@ -11,6 +11,9 @@
 #include "mycode2.h"
 
 #define TIMERINTERVAL 1	// in ticks (tick = 10 msec)
+#define L 20000
+#define MAX_STRIDE 1000000001
+#define MAX_PASS 2147483647
 
 /* 	A sample process table. You may change this any way you wish. 
  */
@@ -18,12 +21,17 @@
 static struct {
 	int valid;		// is this entry valid: 1 = yes, 0 = no
 	int pid;		// process ID (as provided by kernel)
+	int pass;		// used by stride scheduling 
+	int stride;	    // used by stride scheduling
+	int request; 	// used by stride scheduling
 } proctab[MAXPROCS + 1];
 
 
 static int bd_front, bd_end;
 static int lastProc;
 static int size;
+static int totalRequest;
+static int numFree;
 
 /* 	InitSched() is called when the kernel starts up. First, set the
  * 	scheduling policy (see sys.h). Make sure you follow the rules
@@ -32,9 +40,36 @@ static int size;
  *  	to interrupt after a specified number of ticks. 
  */
 
+void _removeProc(int idx) {
+	int i, next;
+	if (size > 0) {
+		for (i = idx; i != bd_end; i = next) {
+			next = (i + 1) % (MAXPROCS + 1);
+			proctab[i].valid = proctab[next].valid;
+			proctab[i].pid = proctab[next].pid;
+			proctab[i].pass = proctab[next].pass;
+			proctab[i].stride = proctab[next].stride;
+			proctab[i].request = proctab[next].request;
+		}
+		bd_end = (bd_end + MAXPROCS) % (MAXPROCS + 1);
+		--size;
+	}
+}
+
+void _clearPassVal() {
+	int i;
+	if (size > 0) {
+		for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+			if (proctab[i].valid == 1) {
+				proctab[i].pass = 0;
+			}
+		}
+	}
+}
+
 void InitSched()
 {
-	int i;
+	int i, j;
 
 	/* First, set the scheduling policy. You should only set it
 	 * from within this conditional statement. While you are working
@@ -52,24 +87,29 @@ void InitSched()
 	 */
 	if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
 							// no other code here
-		SetSchedPolicy(ROUNDROBIN);		// set policy here
+		SetSchedPolicy(PROPORTIONAL);		// set policy here
 							// no other code here
 	}
 		
 	/* Initialize all your data structures here */
 	for (i = 0; i < MAXPROCS; i++) {
 		proctab[i].valid = 0;
+		proctab[i].pid = 0;
+		proctab[i].stride = proctab[i].pass = proctab[i].request = -1;
 	}
 
 	bd_front = bd_end = 0;
 	lastProc = -1;
 	size = 0;
+	totalRequest = 0;
+	numFree = 0;
 	/* Set the timer last */
+
 	SetTimer(TIMERINTERVAL);
 }
 
 
-/*  	StartingProc(p) is called by the kernel when the process
+/*  StartingProc(p) is called by the kernel when the process
  * 	identified by PID p is starting. This allows you to record the
  * 	arrival of a new process in the process table, and allocate any
  * 	resources (if necessary). Returns 1 if successful, 0 otherwise. 
@@ -98,7 +138,19 @@ int StartingProc(int p)
 				++size;
 				return 1;
 			}
-			break;			
+			break;	
+		case PROPORTIONAL:
+			if (size != MAXPROCS) {
+				proctab[bd_end].pid = p;
+				proctab[bd_end].valid = 1;
+				proctab[bd_end].pass = 0;
+				bd_end = (bd_end + 1) % (MAXPROCS + 1);
+				++size;
+				++numFree;
+				_clearPassVal();
+				return 1;
+			}	
+			break;	
 		default:
 			for (i = 0; i < MAXPROCS; i++) {
 				if (! proctab[i].valid) {
@@ -155,6 +207,25 @@ int EndingProc(int p)
 				return 1;
 			}
 			break;
+		case PROPORTIONAL:
+			if (size > 0) {
+				for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+					/* search for process p */
+					if (proctab[i].valid == 1 && proctab[i].pid == p) {
+
+						if (proctab[i].request != -1) {
+							/* release requested rate */
+							totalRequest -= proctab[i].request;
+						} else {
+							--numFree;
+						}
+						_removeProc(i);
+						_clearPassVal();
+						return 1;
+					}
+				}
+			}
+			break;
 		default:
 			for (i = 0; i < MAXPROCS; i++) {
 				if (proctab[i].valid && proctab[i].pid == p) {
@@ -181,6 +252,9 @@ int SchedProc()
 {
 	// DPrintf("schedule, ");
 	int i;
+	int min;
+	int minNotZero;
+	int request;
 	switch(GetSchedPolicy()) {
 
 	case ARBITRARY:
@@ -218,17 +292,49 @@ int SchedProc()
 			lastProc = proctab[bd_front].pid;
 			proctab[bd_front].pid = 0;
 			bd_front = (bd_front + 1) % (MAXPROCS + 1);
-			DPrintf("choose %d\n", lastProc);
+			// DPrintf("choose %d\n", lastProc);
 			return lastProc;
 		}
 		break;
-
 	case PROPORTIONAL:
+		if (size > 0) {
+			min = bd_front;
+			// minNotZero = -1;
+			/* find minimum pass value */
+			for (i = bd_front; i < bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+				if (proctab[i].valid == 1) {
+					if (proctab[i].request == -1) {
+						/* no requested rate */
+						if (totalRequest != 100) {
+							request = (100 - totalRequest) / numFree;
+							proctab[i].stride = request == 0? MAX_STRIDE: L / request;
+						} else {
+							continue;
+						}
+					}
+					if (proctab[i].pass < proctab[min].pass) {
+						min = i;
+					}
+					// if (proctab[i].pass > 0 && (minNotZero == -1 || proctab[i].pass < proctab[minNotZero].pass)) {
+					// 	minNotZero = i;
+					// }
+				}
+			}
 
-		/* your code here */
-
+			/* avoid pass value overflow */
+			if (MAX_PASS - proctab[min].stride <= proctab[min].pass) {
+				minNotZero = proctab[min].pass - 1;
+				for (i = bd_front; i < bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+					if (proctab[i].valid == 1 && proctab[i].pass > 0) {
+						proctab[i].pass -= minNotZero;
+					}
+				}
+			}
+			proctab[min].pass += proctab[min].stride;
+			// DPrintf("choose %d\n", proctab[min].pid);
+			return proctab[min].pid;
+		}
 		break;
-
 	}
 	
 	return(0);
@@ -242,6 +348,7 @@ int SchedProc()
 
 void HandleTimerIntr()
 {
+	// DPrintf("handle! %d\n", GetTimer());
 	SetTimer(TIMERINTERVAL);
 
 	switch(GetSchedPolicy()) {	// is policy preemptive?
@@ -274,7 +381,40 @@ int MyRequestCPUrate(int p, int n)
 	// p: process whose rate to change
 	// n: percent of CPU time
 {
+	int i;
 	/* your code here */
-
-	return(0);
+	if (0 <= n && n <= 100) {
+		for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+			if (proctab[i].valid == 1 && proctab[i].pid == p) {
+				
+				if (proctab[i].request != -1) {
+					/* change previous rate */
+					if (totalRequest - proctab[i].request + n <= 100) {
+						totalRequest = totalRequest - proctab[i].request + n;
+						if (n > 0) {
+							proctab[i].request = n;
+							proctab[i].stride = L / proctab[i].request;
+						} else {
+							proctab[i].request = proctab[i].stride = -1;
+						}
+						_clearPassVal();
+						return 0;
+					}
+				} else {
+					if (n + totalRequest <= 100) {
+						if (n > 0) {
+							totalRequest += n;
+							proctab[i].request = n;
+							proctab[i].stride = L / proctab[i].request;
+							--numFree;
+							_clearPassVal();
+						}
+						return 0;
+					}
+				}
+				break;
+			}
+		}
+	}
+	return -1;
 }
