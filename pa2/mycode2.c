@@ -67,7 +67,7 @@ void _clearPassVal() {
 	}
 }
 
-void InitSched()
+void InitSched(int POLICY)
 {
 	int i, j;
 
@@ -85,11 +85,12 @@ void InitSched()
 	 * the body of the conditional statement, as it will not execute when
 	 * we test your program). 
 	 */
-	if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
+	// if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
+	// 						// no other code here
+	// 	DPrintf("set!\n");
+		SetSchedPolicy(POLICY);		// set policy here
 							// no other code here
-		SetSchedPolicy(PROPORTIONAL);		// set policy here
-							// no other code here
-	}
+	// }
 		
 	/* Initialize all your data structures here */
 	for (i = 0; i < MAXPROCS; i++) {
@@ -119,7 +120,7 @@ int StartingProc(int p)
 	// p: process that is starting
 {
 	int i;
-	DPrintf("%d start \n", p);
+	// DPrintf("%d start \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		case LIFO:
@@ -178,7 +179,7 @@ int EndingProc(int p)
 	// p: process that is ending
 {
 	int i;
-	DPrintf("%d end \n", p);
+	// DPrintf("%d end \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		/* Ending should always begin from front */
@@ -323,6 +324,7 @@ int SchedProc()
 
 			/* avoid pass value overflow */
 			if (MAX_PASS - proctab[min].stride <= proctab[min].pass) {
+				// DPrintf("avoid!\n");
 				minNotZero = proctab[min].pass - 1;
 				for (i = bd_front; i < bd_end; i = (i + 1) % (MAXPROCS + 1)) {
 					if (proctab[i].valid == 1 && proctab[i].pass > 0) {
@@ -390,14 +392,17 @@ int MyRequestCPUrate(int p, int n)
 				if (proctab[i].request != -1) {
 					/* change previous rate */
 					if (totalRequest - proctab[i].request + n <= 100) {
-						totalRequest = totalRequest - proctab[i].request + n;
-						if (n > 0) {
-							proctab[i].request = n;
-							proctab[i].stride = L / proctab[i].request;
-						} else {
-							proctab[i].request = proctab[i].stride = -1;
+						if (n != proctab[i].request) {
+							/* request is different from the previous one */
+							totalRequest = totalRequest - proctab[i].request + n;
+							if (n > 0) {
+								proctab[i].request = n;
+								proctab[i].stride = L / proctab[i].request;
+							} else {
+								proctab[i].request = proctab[i].stride = -1;
+							}
+							_clearPassVal();
 						}
-						_clearPassVal();
 						return 0;
 					}
 				} else {
