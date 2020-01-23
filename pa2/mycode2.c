@@ -19,11 +19,11 @@
  */
 
 static struct {
-	int valid;		// is this entry valid: 1 = yes, 0 = no
-	int pid;		// process ID (as provided by kernel)
-	int pass;		// used by stride scheduling 
-	int stride;	    // used by stride scheduling
-	int request; 	// used by stride scheduling
+	int valid;				// is this entry valid: 1 = yes, 0 = no
+	int pid;				// process ID (as provided by kernel)
+	long long int pass;		// used by stride scheduling 
+	int stride;	    		// used by stride scheduling
+	int request; 			// used by stride scheduling
 } proctab[MAXPROCS + 1];
 
 
@@ -40,7 +40,7 @@ static int numFree;
  *  	to interrupt after a specified number of ticks. 
  */
 
-void _removeProc(int idx) {
+static void _removeProc(int idx) {
 	int i, next;
 	if (size > 0) {
 		for (i = idx; i != bd_end; i = next) {
@@ -56,7 +56,7 @@ void _removeProc(int idx) {
 	}
 }
 
-void _clearPassVal() {
+static void _clearPassVal() {
 	int i;
 	if (size > 0) {
 		for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
@@ -67,7 +67,20 @@ void _clearPassVal() {
 	}
 }
 
-void InitSched(int POLICY)
+static void _resetStrideVal() {
+	int i, stride;
+	if (size > 0 && numFree > 0) {
+		stride = totalRequest == 100? MAX_STRIDE: L / (100 - totalRequest) * numFree;
+		for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
+			if (proctab[i].valid == 1 && proctab[i].request == -1) {
+				proctab[i].stride = stride;
+				proctab[i].pass = 0;
+			}
+		}
+	}
+}
+
+void InitSched()
 {
 	int i, j;
 
@@ -85,12 +98,11 @@ void InitSched(int POLICY)
 	 * the body of the conditional statement, as it will not execute when
 	 * we test your program). 
 	 */
-	// if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
+	if (GetSchedPolicy() == NOSCHEDPOLICY) {	// leave as is
 	// 						// no other code here
-	// 	DPrintf("set!\n");
-		SetSchedPolicy(POLICY);		// set policy here
+		SetSchedPolicy(ARBITRARY);		// set policy here
 							// no other code here
-	// }
+	}
 		
 	/* Initialize all your data structures here */
 	for (i = 0; i < MAXPROCS; i++) {
@@ -120,7 +132,6 @@ int StartingProc(int p)
 	// p: process that is starting
 {
 	int i;
-	// DPrintf("%d start \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		case LIFO:
@@ -148,14 +159,13 @@ int StartingProc(int p)
 				bd_end = (bd_end + 1) % (MAXPROCS + 1);
 				++size;
 				++numFree;
-				_clearPassVal();
+				_resetStrideVal();
 				return 1;
 			}	
 			break;	
 		default:
 			for (i = 0; i < MAXPROCS; i++) {
 				if (! proctab[i].valid) {
-					// DPrintf("Process %d start! its entry is %d\n", p, i);
 					proctab[i].valid = 1;
 					proctab[i].pid = p;
 					return (1);
@@ -179,7 +189,6 @@ int EndingProc(int p)
 	// p: process that is ending
 {
 	int i;
-	// DPrintf("%d end \n", p);
 	switch (GetSchedPolicy()) {
 		case FIFO:
 		/* Ending should always begin from front */
@@ -187,7 +196,6 @@ int EndingProc(int p)
 				proctab[bd_front].pid = 0;
 				bd_front = (bd_front + 1) % (MAXPROCS + 1);
 				--size;
-				// DoSched();
 				return 1;
 			}
 			break;
@@ -197,7 +205,6 @@ int EndingProc(int p)
 				proctab[(bd_end + MAXPROCS) % (MAXPROCS + 1)].pid = 0;
 				bd_end = (bd_end + MAXPROCS) % (MAXPROCS + 1);
 				--size;
-				// DoSched();
 				return 1;
 			}
 			break;
@@ -213,13 +220,13 @@ int EndingProc(int p)
 				for (i = bd_front; i != bd_end; i = (i + 1) % (MAXPROCS + 1)) {
 					/* search for process p */
 					if (proctab[i].valid == 1 && proctab[i].pid == p) {
-
 						if (proctab[i].request != -1) {
 							/* release requested rate */
 							totalRequest -= proctab[i].request;
 						} else {
 							--numFree;
 						}
+						_resetStrideVal();
 						_removeProc(i);
 						_clearPassVal();
 						return 1;
@@ -230,7 +237,6 @@ int EndingProc(int p)
 		default:
 			for (i = 0; i < MAXPROCS; i++) {
 				if (proctab[i].valid && proctab[i].pid == p) {
-					// DPrintf("Process %d end! free entry %d\n", p, i);
 					proctab[i].valid = 0;
 					return(1);
 				}
@@ -251,7 +257,6 @@ int EndingProc(int p)
 
 int SchedProc()
 {
-	// DPrintf("schedule, ");
 	int i;
 	int min;
 	int minNotZero;
@@ -262,19 +267,16 @@ int SchedProc()
 
 		for (i = 0; i < MAXPROCS; i++) {
 			if (proctab[i].valid) {
-				// DPrintf("Sched called !!!!!! choose %d\n", i);
 				return(proctab[i].pid);
 			}
 		}
 		break;
-
 	case FIFO:
 		/* schedule from font */
 		if (size > 0) {
 			return proctab[bd_front].pid;
 		}
 		break;
-
 	case LIFO:
 		/* schedule from end */
 		if (size > 0) {
@@ -282,58 +284,34 @@ int SchedProc()
 		}
 		break;
 	case ROUNDROBIN:
-		// DPrintf("size: %d, ", size);
 		if (size > 0) {
 			if (lastProc > 0) {
 				/* schedule from interrupt */
-				// DPrintf("add %d, ", lastProc);
 				proctab[bd_end].pid = lastProc;
 				bd_end = (bd_end + 1) % (MAXPROCS + 1);
 			}
 			lastProc = proctab[bd_front].pid;
 			proctab[bd_front].pid = 0;
 			bd_front = (bd_front + 1) % (MAXPROCS + 1);
-			// DPrintf("choose %d\n", lastProc);
 			return lastProc;
 		}
 		break;
 	case PROPORTIONAL:
 		if (size > 0) {
 			min = bd_front;
-			// minNotZero = -1;
 			/* find minimum pass value */
 			for (i = bd_front; i < bd_end; i = (i + 1) % (MAXPROCS + 1)) {
 				if (proctab[i].valid == 1) {
-					if (proctab[i].request == -1) {
-						/* no requested rate */
-						if (totalRequest != 100) {
-							request = (100 - totalRequest) / numFree;
-							proctab[i].stride = request == 0? MAX_STRIDE: L / request;
-						} else {
-							continue;
-						}
+					if (proctab[i].request == -1 && totalRequest == 100) {
+						/* no available rate */
+						continue;
 					}
 					if (proctab[i].pass < proctab[min].pass) {
 						min = i;
 					}
-					// if (proctab[i].pass > 0 && (minNotZero == -1 || proctab[i].pass < proctab[minNotZero].pass)) {
-					// 	minNotZero = i;
-					// }
 				}
 			}
-
-			/* avoid pass value overflow */
-			if (MAX_PASS - proctab[min].stride <= proctab[min].pass) {
-				// DPrintf("avoid!\n");
-				minNotZero = proctab[min].pass - 1;
-				for (i = bd_front; i < bd_end; i = (i + 1) % (MAXPROCS + 1)) {
-					if (proctab[i].valid == 1 && proctab[i].pass > 0) {
-						proctab[i].pass -= minNotZero;
-					}
-				}
-			}
-			proctab[min].pass += proctab[min].stride;
-			// DPrintf("choose %d\n", proctab[min].pid);
+			proctab[min].pass = proctab[min].pass + proctab[min].stride;
 			return proctab[min].pid;
 		}
 		break;
@@ -350,7 +328,6 @@ int SchedProc()
 
 void HandleTimerIntr()
 {
-	// DPrintf("handle! %d\n", GetTimer());
 	SetTimer(TIMERINTERVAL);
 
 	switch(GetSchedPolicy()) {	// is policy preemptive?
@@ -399,8 +376,9 @@ int MyRequestCPUrate(int p, int n)
 								proctab[i].request = n;
 								proctab[i].stride = L / proctab[i].request;
 							} else {
-								proctab[i].request = proctab[i].stride = -1;
+								proctab[i].request = -1;
 							}
+							_resetStrideVal();
 							_clearPassVal();
 						}
 						return 0;
@@ -412,6 +390,7 @@ int MyRequestCPUrate(int p, int n)
 							proctab[i].request = n;
 							proctab[i].stride = L / proctab[i].request;
 							--numFree;
+							_resetStrideVal();
 							_clearPassVal();
 						}
 						return 0;
