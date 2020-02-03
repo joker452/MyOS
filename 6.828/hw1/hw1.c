@@ -62,21 +62,77 @@ void runcmd(struct cmd *cmd) {
         if (ecmd->argv[0] == 0) {
             _exit(0);
         }
-        fprintf(stderr, "exec not implemented\n");
-        // Your code here ...
+        if (access(ecmd->argv[0], F_OK) == -1) {
+            /* try to find executable in current directory but fail */
+            char path[100] = "/bin/";
+            strcat(path, ecmd->argv[0]);
+            r = execv(path, ecmd->argv);
+        } else {
+            r = execv(ecmd->argv[0], ecmd->argv);
+        }
+        if (r == -1) {
+            _exit(-1);
+        }
         break;
     case '>':
     case '<':
         rcmd = (struct redircmd *)cmd;
-        fprintf(stderr, "redir not implemented\n");
-        // Your code here ...
+        if (rcmd->type == '<') {
+            /* redirect stdin */
+            if (close(0) == -1) {
+                fprintf(stderr, "close stdin fail\n");
+                _exit(-1);
+            }
+            if (open(rcmd->file, rcmd->flags) != rcmd->fd) {
+                fprintf(stderr, "open file for stdin fail\n");
+                _exit(-1);
+            }
+        } else {
+            /* redirect stdout */
+            if (close(1) == -1) {
+                fprintf(stderr, "close stdout fail\n");
+                _exit(-1);
+            }
+            if (open(rcmd->file, rcmd->flags, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) == -1) {
+                fprintf(stderr, "open file for stdout fail\n");
+                _exit(-1);
+            }
+        }
         runcmd(rcmd->cmd);
         break;
 
     case '|':
         pcmd = (struct pipecmd *)cmd;
-        fprintf(stderr, "pipe not implemented\n");
-        // Your code here ...
+        if (pipe(p) == -1) {
+            fprintf(stderr, "pipe fail\n");
+            _exit(-1);
+        }
+
+        r = fork1();
+        if (r == 0) {
+            /* child for LHS of pipe */
+            close(1);
+            dup(p[1]);
+            close(p[0]);
+            close(p[1]);
+            runcmd(pcmd->left);
+        } else {
+            r = fork1();
+            if (r == 0) {
+                /* child for RHS of pipe */
+                close(0);
+                dup(p[0]);
+                close(p[0]);
+                close(p[1]);
+                runcmd(pcmd->right);
+            } else {
+                /* parent */
+                close(p[0]);
+                close(p[1]);
+                wait(NULL);
+                wait(NULL);
+            }
+        }
         break;
     }
     _exit(0);
@@ -124,6 +180,7 @@ int fork1(void) {
 
     if ((pid = fork()) == -1) {
         perror("fork");
+        _exit(EXIT_FAILURE);
     }
 
     return pid;
@@ -167,6 +224,7 @@ struct cmd *pipecmd(struct cmd *left, struct cmd *right) {
 char whitespace[] = " \t\r\n\v";
 char symbols[] = "<|>";
 
+/* skip whitespace between tokens, if q and eq is not 0, then token is in range [q, eq)*/
 int gettoken(char **ps, char *es, char **q, char **eq) {
     char *s;
     int ret;
@@ -211,6 +269,7 @@ int gettoken(char **ps, char *es, char **q, char **eq) {
     return ret;
 }
 
+/* skip whitespace and judge whether remaining part begins with toks */
 int peek(char **ps, char *es, char *toks) {
     char *s;
 
@@ -319,6 +378,7 @@ struct cmd *parseexec(char **ps, char *es) {
         }
         ret = parseredirs(ret, ps, es);
     }
+    /* mark end of arguments */
     cmd->argv[argc] = 0;
     return ret;
 }
