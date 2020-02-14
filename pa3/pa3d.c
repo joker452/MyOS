@@ -148,12 +148,9 @@
 static struct {
 
 	int onroads[2];		// cars on the road from different direction
-
 	int blocked[2];		// cars blocked gate from different direction
-
 	int gates[2];		// semaphore for gates, cars blocked on gate ARE NOT attempting entering
 	int first_occupied[2]; // first position for different directions occupied or not
-
 	int pos_lock[NUMPOS];	// mutex lock for each position 
 	int shm_lock;   // mutex lock for the share memory struct
 
@@ -224,6 +221,7 @@ void InitRoad()
 }
 
 #define IPOS(FROM)	(((FROM) == WEST) ? 1 : NUMPOS)
+#define TO(FROM) (((FROM) == WEST) ? NUMPOS: 1)
 
 void driveRoad(int from, int mph)
 	// from: coming from which direction
@@ -241,19 +239,16 @@ void driveRoad(int from, int mph)
 	if ((shm.onroads[idx] > 0 && (shm.first_occupied[idx] > 0 || shm.blocked[1 - idx] > 0)) || shm.onroads[1 - idx] > 0) {
 		++shm.blocked[idx];
 		Signal(shm.shm_lock);
-		// DPrintf("%d blocked!\n", c);
 		Wait(shm.gates[idx]);
 	} else {
+		// attempt to enter road
+		Wait(shm.pos_lock[IPOS(from) - 1]);
+		// change road state
+		++shm.onroads[idx];
+		shm.first_occupied[idx] = 1;
 		Signal(shm.shm_lock);
 	}
 
-	// attempt to enter road
-	Wait(shm.pos_lock[IPOS(from) - 1]);
-	// change road state
-	Wait(shm.shm_lock);
-	++shm.onroads[idx];
-	shm.first_occupied[idx] = 1;
-	Signal(shm.shm_lock);
 
 	// DO NOT MODIFY THE NEXT 3 STATEMENTS IN ANY WAY!
 	EnterRoad(from);
@@ -284,8 +279,10 @@ void driveRoad(int from, int mph)
 			shm.first_occupied[idx] = 0;
 			if (shm.blocked[1 - idx] == 0 && shm.blocked[idx] > 0) {
 				--shm.blocked[idx];
+				++shm.onroads[idx];
+				shm.first_occupied[idx] = 1;
+				Wait(shm.pos_lock[IPOS(from) - 1]);
 				Signal(shm.shm_lock);
-				// DPrintf("unblock!\n");
 				Signal(shm.gates[idx]);
 			} else {
 				Signal(shm.shm_lock);
@@ -305,6 +302,9 @@ void driveRoad(int from, int mph)
 	Wait(shm.shm_lock);
 	if (--shm.onroads[idx] == 0 && shm.blocked[1 - idx] > 0) {
 		--shm.blocked[1 - idx];
+		++shm.onroads[1 - idx];
+		shm.first_occupied[1 - idx] = 1;
+		Wait(shm.pos_lock[TO(from) - 1]);
 		Signal(shm.shm_lock);
 		Signal(shm.gates[1 - idx]);
 	} else {
