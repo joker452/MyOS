@@ -141,6 +141,22 @@
 #include "sys.h"
 #include "umix.h"
 
+
+// west -> 0, east -> 1
+#define POS_IDX(FROM)	(((FROM) == WEST) ? 0 : 1)
+
+static struct {
+
+	int onroads[2];		// cars on the road from different direction
+	int blocked[2];		// cars blocked gate from different direction
+	int gates[2];		// semaphore for gates, cars blocked on gate ARE NOT attempting entering
+	int first_occupied[2]; // first position for different directions occupied or not
+	int pos_lock[NUMPOS];	// mutex lock for each position 
+	int shm_lock;   // mutex lock for the share memory struct
+
+} shm;
+
+
 void InitRoad(void);
 void driveRoad(int from, int mph);
 
@@ -153,7 +169,7 @@ void Main()
 	 * different numbers of cars,  directions and speeds to test your
 	 * modification of driveRoad.  When your solution is tested, we
 	 * will use different Main procedures,  which will first call
-	 * InitRoad before any calls to driveRoad.  So,  you should do
+	 * InitRoad before any calls to driveRoad.  So, you should do
 	 * any initializations in InitRoad. 
 	 */
 
@@ -188,10 +204,24 @@ void Main()
 
 void InitRoad()
 {
-	/* do any initializations here */
+	int i;
+	Regshm((char *) &shm, sizeof(shm));
+	shm.onroads[0] = shm.onroads[1] = 0;
+	shm.blocked[0] = shm.blocked[1] = 0;
+	shm.first_occupied[0] = shm.first_occupied[1] = 0;
+
+	shm.gates[0] = Seminit(0);
+	shm.gates[1] = Seminit(0);
+
+	for (i = 0; i < NUMPOS; ++i) {
+		shm.pos_lock[i] = Seminit(1);
+	}
+
+	shm.shm_lock = Seminit(1);
 }
 
 #define IPOS(FROM)	(((FROM) == WEST) ? 1 : NUMPOS)
+#define TO(FROM) (((FROM) == WEST) ? NUMPOS: 1)
 
 void driveRoad(int from, int mph)
 	// from: coming from which direction
@@ -201,6 +231,24 @@ void driveRoad(int from, int mph)
 	int p, np, i;			// positions
 
 	c = Getpid();			// learn this car's ID
+
+	int idx = POS_IDX(from);
+
+	// condition C(1), C(2) and condition D will cause cars blocked
+	Wait(shm.shm_lock);
+	if ((shm.onroads[idx] > 0 && (shm.first_occupied[idx] > 0 || shm.blocked[1 - idx] > 0)) || shm.onroads[1 - idx] > 0) {
+		++shm.blocked[idx];
+		Signal(shm.shm_lock);
+		Wait(shm.gates[idx]);
+	} else {
+		// attempt to enter road
+		Wait(shm.pos_lock[IPOS(from) - 1]);
+		// change road state
+		++shm.onroads[idx];
+		shm.first_occupied[idx] = 1;
+		Signal(shm.shm_lock);
+	}
+
 
 	// DO NOT MODIFY THE NEXT 3 STATEMENTS IN ANY WAY!
 	EnterRoad(from);
@@ -216,16 +264,50 @@ void driveRoad(int from, int mph)
 			np = p - 1;
 		}
 
+		Wait(shm.pos_lock[np - 1]);
 		// DO NOT MODIFY THE NEXT 4 STATEMENTS IN ANY WAY!
 		Delay(3600/mph);
 		ProceedRoad();
 		PrintRoad();
 		Printf("Car %d moves from %d to %d\n", c, p, np);
+		Signal(shm.pos_lock[p - 1]);
+
+
+		if (p == IPOS(from)) {
+			// unblock cars of reason C(1)
+			Wait(shm.shm_lock);
+			shm.first_occupied[idx] = 0;
+			if (shm.blocked[1 - idx] == 0 && shm.blocked[idx] > 0) {
+				--shm.blocked[idx];
+				++shm.onroads[idx];
+				shm.first_occupied[idx] = 1;
+				Wait(shm.pos_lock[IPOS(from) - 1]);
+				Signal(shm.shm_lock);
+				Signal(shm.gates[idx]);
+			} else {
+				Signal(shm.shm_lock);
+			}
+		}
 	}
+
 
 	// DO NOT MODIFY THE NEXT 4 STATEMENTS IN ANY WAY!
 	Delay(3600/mph);
 	ProceedRoad();
 	PrintRoad();
 	Printf("Car %d exits road\n", c);
+	Signal(shm.pos_lock[np - 1]);
+
+	// change road state and unblock cars of reason D
+	Wait(shm.shm_lock);
+	if (--shm.onroads[idx] == 0 && shm.blocked[1 - idx] > 0) {
+		--shm.blocked[1 - idx];
+		++shm.onroads[1 - idx];
+		shm.first_occupied[1 - idx] = 1;
+		Wait(shm.pos_lock[TO(from) - 1]);
+		Signal(shm.shm_lock);
+		Signal(shm.gates[1 - idx]);
+	} else {
+		Signal(shm.shm_lock);
+	}
 }
