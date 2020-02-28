@@ -5,7 +5,6 @@
  *  	modify the bodies of these functions (and add code outside of them)
  *  	in any way you wish (however, you cannot change their interfaces).  
  */
-
 #include <setjmp.h>
 #include <string.h>
 #include "aux.h"
@@ -13,13 +12,11 @@
 #include "mycode4.h"
 
 #define STACKSIZE	65536		// maximum size of thread stack
-#define CACHESIZE	((STACKSIZE) + 128)	
 
 static int MyInitThreadsCalled = 0;	// 1 if MyInitThreads called, else 0
 
 static struct thread {			// thread table
 	int valid;					// 1 if entry is valid, else 0
-	int inited;					// 1 if stack space ever initialzed, else 0
 	void (*func)();				// function pointer
 	int param;					// function param
 	jmp_buf env;				// current context
@@ -27,7 +24,6 @@ static struct thread {			// thread table
 	int prev, next;
 } thread[MAXTHREADS + 1];
 
-// static char envCache[CACHESIZE]; 
 
 static int curThread = 0;	// in the beginning, only thread 0 runs
 static int nextThread = 0;	// next thread ID
@@ -40,7 +36,7 @@ static int numThread = 1;
 
 void MyInitThreads()
 {
-	int i;
+	int i, size;
 
 	if (MyInitThreadsCalled) {		// run only once
 		Printf("MyInitThreads: should be called only once\n");
@@ -49,17 +45,33 @@ void MyInitThreads()
 
 	for (i = 0; i < MAXTHREADS + 1; i++) {	// initialize thread table
 		thread[i].valid = 0;
-		thread[i].inited = 0;
 	}
 
 
-	thread[1].valid = 1;			// initialize thread 0
 	thread[0].prev = 1;
 	thread[0].next = 1;
 	thread[1].prev = 0;
 	thread[1].next = 0;
+	thread[1].valid = 1;			// initialize thread 0
 
 	MyInitThreadsCalled = 1;
+
+	// allocate stack space
+	for (i = 1; i <= MAXTHREADS; ++i) {
+
+		char stack[(size = i > 1? STACKSIZE + 256: 0)];
+		if (((int) &stack[STACKSIZE - 1]) - ((int) &stack[0]) + 1 != STACKSIZE) {
+			Printf("Stack space reservation failed\n");
+			Exit();
+		}
+		
+
+		if (setjmp(thread[i].cacheEnv) != 0) {
+			(*thread[curThread + 1].func)(thread[curThread + 1].param);
+			MyExitThread();
+		}
+	}
+
 }
 
 /* 	MyCreateThread(f, p) creates a new thread to execute f(p),
@@ -72,7 +84,6 @@ int MyCreateThread(void (*f)(), int p)
 	// f: function to be executed
 	// p: integer parameter
 {
-	unsigned int i;
 	int k;
 	if (! MyInitThreadsCalled) {
 		Printf("MyCreateThread: Must call MyInitThreads first\n");
@@ -106,47 +117,20 @@ int MyCreateThread(void (*f)(), int p)
 			}
 		}
 
-		// DPrintf("In create, current %d next %d\n", curThread, nextThread);
-		// append to list tail
+	
+		// appendn nexThread to list tail
 		thread[thread[0].prev].next = nextThread + 1;
 		thread[nextThread + 1].prev = thread[0].prev;
 		thread[0].prev = nextThread + 1;
 		thread[nextThread + 1].next = 0;
-		// only after MAXTHREADS is used, can ID be reused, so here nextThread always > curThread
-		if (thread[nextThread + 1].inited == 0) {
-			
-			int stackSize = (nextThread - curThread) * STACKSIZE;
-			char stack[stackSize];
-			// thread[nextThread + 1].sp = (unsigned int) ((&stack[stackSize - 1]) + 1);
-			thread[nextThread + 1].func = f;
-			thread[nextThread + 1].param = p;
-			// DPrintf("Thread %d create %d, try to save %d %p %p\n", curThread, nextThread, stackSize,  &stack[stackSize - 1], &stack[0]);
-			if (((int) &stack[stackSize - 1]) - ((int) &stack[0]) + 1 != stackSize) {
-				Printf("Stack space reservation failed\n");
-				Exit();
-			}
-			if (setjmp(thread[nextThread + 1].env) == 0) {	// save context of nextThread
-				thread[nextThread + 1].inited = 1;
-				// save env when thread created
-				memcpy(thread[nextThread + 1].cacheEnv, thread[nextThread + 1].env, sizeof(jmp_buf));
-				longjmp(thread[curThread + 1].env, 1);	// back to curThread
-			}
-		} else {
-			thread[nextThread + 1].func = f;
-			thread[nextThread + 1].param = p;
-			memcpy(thread[nextThread + 1].env, thread[nextThread + 1].cacheEnv, sizeof(jmp_buf));
-			longjmp(thread[curThread + 1].env, 1);
-		}
 
-		// special case for thread 0
-		if (thread[1].inited == 0) {
-			setjmp(thread[1].cacheEnv);
-			thread[1].inited = 1;
-		}
 
-		(*thread[curThread + 1].func)(thread[curThread + 1].param);
+		// set nextThread's function and parameter
+		thread[nextThread + 1].func = f;
+		thread[nextThread + 1].param = p;
+		memcpy(thread[nextThread + 1].env, thread[nextThread + 1].cacheEnv, sizeof(jmp_buf));
+		longjmp(thread[curThread + 1].env, 1);
 
-		MyExitThread();			// thread 1 is done - exit
 	}
 
 	thread[nextThread + 1].valid = 1;	// mark the entry for the new thread valid
