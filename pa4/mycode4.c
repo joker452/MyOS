@@ -60,7 +60,10 @@ void MyInitThreads()
 	for (i = 1; i <= MAXTHREADS; ++i) {
 
 		char stack[(size = i > 1? STACKSIZE + 256: 0)];
-		if (((int) &stack[STACKSIZE - 1]) - ((int) &stack[0]) + 1 != STACKSIZE) {
+		stack[0] = 'a' + i;
+
+
+		if (i > 1 && (((int) &stack[STACKSIZE - 1]) - ((int) &stack[0]) + 1 != STACKSIZE)) {
 			Printf("Stack space reservation failed\n");
 			Exit();
 		}
