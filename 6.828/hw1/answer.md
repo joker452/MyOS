@@ -1,0 +1,55 @@
+# Questions
+
+Exercise:
+Here is what the register looks like when the program stops at break point "_start"  
+
+```shell
+eax            0x0      0
+ecx            0x0      0
+edx            0x1f0    496
+ebx            0x10074  65652
+esp            0x7bcc   0x7bcc
+ebp            0x7bf8   0x7bf8
+esi            0x10074  65652
+edi            0x0      0
+eip            0x10000c 0x10000c
+eflags         0x46     [ PF ZF ]
+cs             0x8      8
+ss             0x10     16
+ds             0x10     16
+es             0x10     16
+fs             0x0      0
+gs             0x0      0
+```
+
+And the stack  
+
+```shell
+(gdb) x/24x $esp
+0x7bcc: 0x00007db7      0x00000000      0x00000000      0x00000000
+0x7bdc: 0x00000000      0x00000000      0x00000000      0x00000000
+0x7bec: 0x00000000      0x00000000      0x00000000      0x00000000
+0x7bfc: 0x00007c4d      0x8ec031fa      0x8ec08ed8      0xa864e4d0
+0x7c0c: 0xb0fa7502      0xe464e6d1      0x7502a864      0xe6dfb0fa
+0x7c1c: 0x16010f60      0x200f7c78      0xc88366c0      0xc0220f01
+```
+
+The comment is as follows:  
+
+```shell
+0x7c00: 0x8ec031fa          | not the stack!
+0x7bfc: 0x00007c4d          | bootmain() return address
+0x7bf8: 0x00000000          | old ebp
+0x7bf4: 0x00000000          | old edi
+0x7bf0: 0x00000000          | old esi
+0x7bec: 0x00000000          | old ebx
+0x7be8: 0x00000000
+0x7be4: 0x00000000
+0x7be0: 0x00000000
+0x7bdc: 0x00000000          | local vars (sub $0x1c,%esp)
+
+0x7bd8: 0x00000000
+0x7bd4: 0x00000000
+0x7bd0: 0x00000000
+0x7bcc: 0x00007db7          | entry() return address
+```
