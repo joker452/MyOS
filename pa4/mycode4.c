@@ -5,21 +5,30 @@
  *  	modify the bodies of these functions (and add code outside of them)
  *  	in any way you wish (however, you cannot change their interfaces).  
  */
-
 #include <setjmp.h>
-
+#include <string.h>
 #include "aux.h"
 #include "umix.h"
 #include "mycode4.h"
 
+#define STACKSIZE	65536		// maximum size of thread stack
+
 static int MyInitThreadsCalled = 0;	// 1 if MyInitThreads called, else 0
 
 static struct thread {			// thread table
-	int valid;			// 1 if entry is valid, else 0
-	jmp_buf env;			// current context
-} thread[MAXTHREADS];
+	int valid;					// 1 if entry is valid, else 0
+	void (*func)();				// function pointer
+	int param;					// function param
+	jmp_buf env;				// current context
+	jmp_buf cacheEnv;
+	int prev, next;
+} thread[MAXTHREADS + 1];
 
-#define STACKSIZE	65536		// maximum size of thread stack
+
+static int curThread = 0;	// in the beginning, only thread 0 runs
+static int nextThread = 0;	// next thread ID
+static int numThread = 1; 	
+
 
 /* 	MyInitThreads() initializes the thread package. Must be the first
  * 	function called by any user program that uses the thread package. 
@@ -27,20 +36,45 @@ static struct thread {			// thread table
 
 void MyInitThreads()
 {
-	int i;
+	int i, size;
 
 	if (MyInitThreadsCalled) {		// run only once
 		Printf("MyInitThreads: should be called only once\n");
 		Exit();
 	}
 
-	for (i = 0; i < MAXTHREADS; i++) {	// initialize thread table
+	for (i = 0; i < MAXTHREADS + 1; i++) {	// initialize thread table
 		thread[i].valid = 0;
 	}
 
-	thread[0].valid = 1;			// initialize thread 0
+
+	thread[0].prev = 1;
+	thread[0].next = 1;
+	thread[1].prev = 0;
+	thread[1].next = 0;
+	thread[1].valid = 1;			// initialize thread 0
 
 	MyInitThreadsCalled = 1;
+
+	// allocate stack space
+	for (i = 1; i <= MAXTHREADS; ++i) {
+
+		char stack[(size = i > 1? STACKSIZE + 256: 0)];
+		stack[0] = 'a' + i;
+
+
+		if (i > 1 && (((int) &stack[STACKSIZE - 1]) - ((int) &stack[0]) + 1 != STACKSIZE)) {
+			Printf("Stack space reservation failed\n");
+			Exit();
+		}
+		
+
+		if (setjmp(thread[i].cacheEnv) != 0) {
+			(*thread[curThread + 1].func)(thread[curThread + 1].param);
+			MyExitThread();
+		}
+	}
+
 }
 
 /* 	MyCreateThread(f, p) creates a new thread to execute f(p),
@@ -53,12 +87,17 @@ int MyCreateThread(void (*f)(), int p)
 	// f: function to be executed
 	// p: integer parameter
 {
+	int k;
 	if (! MyInitThreadsCalled) {
 		Printf("MyCreateThread: Must call MyInitThreads first\n");
 		Exit();
 	}
 
-	if (setjmp(thread[0].env) == 0) {	// save context of thread 0
+	if (numThread >= MAXTHREADS) {
+		return -1;
+	}
+
+	if (setjmp(thread[curThread + 1].env) == 0) {	// save context of curThread
 
 		/* The new thread will need stack space.  Here we use the
 		 * following trick: the new thread simply uses the current
@@ -71,29 +110,35 @@ int MyCreateThread(void (*f)(), int p)
 		 * removing it, it should be referenced. 
 		 */
 
-		char stack[STACKSIZE];	// reserve space for thread 0's stack
-		void (*func)() = f;	// func saves f on top of stack
-		int param = p;		// param saves p on top of stack
-
-		if (((int) &stack[STACKSIZE-1]) - ((int) &stack[0]) + 1 != STACKSIZE) {
-			Printf("Stack space reservation failed\n");
-			Exit();
+		// find nextThread's position in thread table
+		for (k = 1; k <= MAXTHREADS; ++k) {
+			int next = (nextThread + k) % MAXTHREADS;
+			if (thread[next + 1].valid == 0) {
+				nextThread = next;
+				++numThread;
+				break;
+			}
 		}
 
-		if (setjmp(thread[1].env) == 0) {	// save context of 1
-			longjmp(thread[0].env, 1);	// back to thread 0
-		}
+	
+		// appendn nexThread to list tail
+		thread[thread[0].prev].next = nextThread + 1;
+		thread[nextThread + 1].prev = thread[0].prev;
+		thread[0].prev = nextThread + 1;
+		thread[nextThread + 1].next = 0;
 
-		/* here when thread 1 is scheduled for the first time */
 
-		(*func)(param);			// execute func(param)
+		// set nextThread's function and parameter
+		thread[nextThread + 1].func = f;
+		thread[nextThread + 1].param = p;
+		memcpy(thread[nextThread + 1].env, thread[nextThread + 1].cacheEnv, sizeof(jmp_buf));
+		longjmp(thread[curThread + 1].env, 1);
 
-		MyExitThread();			// thread 1 is done - exit
 	}
 
-	thread[1].valid = 1;	// mark the entry for the new thread valid
-
-	return(1);		// done, return new thread ID
+	thread[nextThread + 1].valid = 1;	// mark the entry for the new thread valid
+	
+	return(nextThread);		// done, return new thread ID
 }
 
 /*  	MyYieldThread(t) causes the running thread, call it T, to yield to
@@ -108,6 +153,7 @@ int MyCreateThread(void (*f)(), int p)
 int MyYieldThread(int t)
 	// t: thread being yielded to
 {
+	int ret, prevThread;
 	if (! MyInitThreadsCalled) {
 		Printf("MyYieldThread: Must call MyInitThreads first\n");
 		Exit();
@@ -117,14 +163,38 @@ int MyYieldThread(int t)
 		Printf("MyYieldThread: %d is not a valid thread ID\n", t);
 		return(-1);
 	}
-	if (! thread[t].valid) {
+	if (!thread[t + 1].valid) {
 		Printf("MyYieldThread: Thread %d does not exist\n", t);
 		return(-1);
 	}
 
-        if (setjmp(thread[1-t].env) == 0) {
-                longjmp(thread[t].env, 1);
-        }
+	// thread yield to itself, returns immediately
+	if (curThread == t) {
+		return t;
+	}
+
+	// put curThread to tail
+	thread[thread[curThread + 1].prev].next = thread[curThread + 1].next;
+	thread[thread[curThread + 1].next].prev = thread[curThread + 1].prev;
+	thread[thread[0].prev].next = curThread + 1;
+	thread[curThread + 1].prev = thread[0].prev;
+	thread[0].prev = curThread + 1;
+	thread[curThread + 1].next = 0;
+	// move thread t to head
+	thread[thread[t + 1].prev].next = thread[t + 1].next;
+	thread[thread[t + 1].next].prev = thread[t + 1].prev;
+	thread[t + 1].next = thread[0].next;
+	thread[t + 1].prev = 0;
+	thread[thread[0].next].prev = t + 1;
+	thread[0].next = t + 1;
+
+    if ((ret = setjmp(thread[curThread + 1].env)) == 0) {
+		prevThread = curThread;
+		curThread = t;
+		longjmp(thread[t + 1].env, prevThread + 1);
+    }
+
+	return ret > 0? ret - 1: ret;
 }
 
 /*  	MyGetThread() returns ID of currently running thread. 
@@ -137,6 +207,7 @@ int MyGetThread()
 		Exit();
 	}
 
+	return curThread;
 }
 
 /* 	MySchedThread() causes the running thread to simply give up the
@@ -151,6 +222,25 @@ void MySchedThread()
 		Printf("MySchedThread: Must call MyInitThreads first\n");
 		Exit();
 	}
+	// remove curThread
+	thread[thread[curThread + 1].prev].next = thread[curThread + 1].next;
+	thread[thread[curThread + 1].next].prev = thread[curThread + 1].prev;
+
+	if (thread[curThread + 1].valid == 1) {
+		// put curThread to tail
+		thread[thread[0].prev].next = curThread + 1;
+		thread[curThread + 1].prev = thread[0].prev;
+		thread[0].prev = curThread + 1;
+		thread[curThread + 1].next = 0;
+		if (setjmp(thread[curThread + 1].env) == 0) {
+			curThread = thread[0].next - 1;
+			longjmp(thread[thread[0].next].env, -1);
+    	}
+	} else {
+		curThread = thread[0].next - 1;
+		longjmp(thread[thread[0].next].env, -1);
+	}
+
 }
 
 /* 	MyExitThread() causes the currently running thread to exit.  
@@ -160,6 +250,15 @@ void MyExitThread()
 {
 	if (! MyInitThreadsCalled) {
 		Printf("MyExitThread: Must call MyInitThreads first\n");
+		Exit();
+	}
+
+	if (numThread > 1) {
+		--numThread;
+		thread[curThread + 1].valid = 0;	
+		MySchedThread();
+	} else {
+		--numThread;
 		Exit();
 	}
 }
