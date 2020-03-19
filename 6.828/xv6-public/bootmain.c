@@ -6,6 +6,7 @@
 // sector 1 and then jumps to the kernel entry routine.
 
 #include "types.h"
+#include "stdio.h"
 #include "elf.h"
 #include "x86.h"
 #include "memlayout.h"
@@ -37,7 +38,7 @@ bootmain(void)
   for(; ph < eph; ph++){
     pa = (uchar*)ph->paddr;
     readseg(pa, ph->filesz, ph->off);
-    // memory size > file size, set redundant part to zero
+    // if program memory size > file size, which means there is data in .bss, set redundant part to zero
     if(ph->memsz > ph->filesz)
       stosb(pa + ph->filesz, 0, ph->memsz - ph->filesz);
   }

@@ -12,7 +12,9 @@
 start:
   cli                         # BIOS enabled interrupts; disable
 
+  # BIOS doesn't guarantee anything about the contents of segment registers.
   # Zero data segment registers DS, ES, and SS.
+  # Cannot directly modify cs
   xorw    %ax,%ax             # Set %ax to zero
   movw    %ax,%ds             # -> Data Segment
   movw    %ax,%es             # -> Extra Segment
@@ -67,6 +69,8 @@ start32:
 
   # If bootmain returns (it shouldn't), trigger a Bochs
   # breakpoint if running under Bochs, then loop.
+  # On real hardware, there is no device connected to 0x8a00.
+  # If bootloader is running inside a simulator, then 0x8a00 is connected to the simulator iteself.
   movw    $0x8a00, %ax            # 0x8a00 -> port 0x8a00
   movw    %ax, %dx
   outw    %ax, %dx
