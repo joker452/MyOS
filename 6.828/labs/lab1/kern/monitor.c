@@ -63,6 +63,9 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	uint32_t* eip;
 	uint32_t i;
 
+
+	// ebp is current frame pointer's position
+	// *ebp, i.e., the value on the stack position ebp points to is previous ebp position
 	do {
 		eip = (uint32_t*) ebp + 1;
 		cprintf("  ebp %08x  eip %08x  args", ebp, *eip);
@@ -72,8 +75,12 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 		cprintf("\n");
 		struct Eipdebuginfo info;
 
+		// get info about position eip points to
 		debuginfo_eip((uintptr_t) *eip, &info);
+		// print filename and line in the file
 		cprintf("       %s:%d", info.eip_file, info.eip_line);
+		// print function name, because it's non-null terminated, use namelen to limit number of char printed
+		// relative byte is difference between eip and function start
 		cprintf(": %.*s+%d\n", info.eip_fn_namelen, info.eip_fn_name, (uintptr_t) *eip - info.eip_fn_addr);
 		ebp = *((uint32_t *)ebp);
 	} while (ebp != 0);
