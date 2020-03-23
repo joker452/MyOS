@@ -16,6 +16,7 @@ SECTIONS
 		*(.text .stub .text.* .gnu.linkonce.t.*)
 	}
 
+	/* PROVIDE defines a symbol only if it is referenced, and only if it is not defined by any object included in the link. */
 	PROVIDE(etext = .);	/* Define the 'etext' symbol to this value */
 
 	.rodata : {
