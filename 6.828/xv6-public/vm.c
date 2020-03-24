@@ -30,8 +30,8 @@ seginit(void)
 }
 
 // Return the address of the PTE in page table pgdir
-// that corresponds to virtual address va.  If alloc!=0,
-// create any required page table pages.
+// that corresponds to virtual address va.  If alloc!=0 (want to allocate),
+// create required page table pages.
 static pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
@@ -62,9 +62,9 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 {
   char *a, *last;
   pte_t *pte;
-
   a = (char*)PGROUNDDOWN((uint)va);
   last = (char*)PGROUNDDOWN(((uint)va) + size - 1);
+  
   for(;;){
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
@@ -126,12 +126,13 @@ setupkvm(void)
   memset(pgdir, 0, PGSIZE);
   if (P2V(PHYSTOP) > (void*)DEVSPACE)
     panic("PHYSTOP too high");
-  for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
+  for(k = kmap; k < &kmap[NELEM(kmap)]; k++) {
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
                 (uint)k->phys_start, k->perm) < 0) {
       freevm(pgdir);
       return 0;
     }
+  }
   return pgdir;
 }
 
@@ -144,11 +145,12 @@ kvmalloc(void)
   switchkvm();
 }
 
-// Switch h/w page table register to the kernel-only page table,
+// Switch h/w page table register (cr3) to the kernel-only page table,
 // for when no process is running.
 void
 switchkvm(void)
 {
+  // load physical address of kpgdir to cr3
   lcr3(V2P(kpgdir));   // switch to the kernel page table
 }
 

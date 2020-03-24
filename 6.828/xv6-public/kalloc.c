@@ -69,6 +69,8 @@ kfree(char *v)
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
+
+  // add to freelist
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;

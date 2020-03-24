@@ -9,7 +9,7 @@
 static void startothers(void);
 static void mpmain(void)  __attribute__((noreturn));
 extern pde_t *kpgdir;
-extern char end[]; // first address after kernel loaded from ELF file
+extern char end[]; // first address after kernel loaded from ELF file, defined in kernel.ld
 
 // Bootstrap processor starts running C code here.
 // Allocate a real stack and switch to it, first
@@ -17,8 +17,17 @@ extern char end[]; // first address after kernel loaded from ELF file
 int
 main(void)
 {
+  // init kernel mem lock, set use_lock to 0, f
+  // add [end, P2V(4M)] to free list  
   kinit1(end, P2V(4*1024*1024)); // phys page allocator
+
+  // init kernel page table
+  // allocate one 4KB page for page directory table
+  // map predefined kernel virtual memory to physical memory (also predefined)ne
+  // finally load kernel pgdir base address into cr3
   kvmalloc();      // kernel page table
+
+
   mpinit();        // detect other processors
   lapicinit();     // interrupt controller
   seginit();       // segment descriptors
@@ -32,8 +41,23 @@ main(void)
   fileinit();      // file table
   ideinit();       // disk 
   startothers();   // start other processors
+
+  // set use_lock to 1
+  // add [P2V(4MB), P2V(E000000)] to free list
   kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
+
+
+  // allocate a process struct (allocate kernel stack, set up trap frame and trapret, forkret)
+  // state is EMBRYO
+  // set up segment registers
+  // enable interrupt in eflags
+  // pagedir points to kernel pgdir
+  // allocate one page and load init to it
+  // set process current dir to "/" (inode parse???)
+  // set state to RUNNABLE
   userinit();      // first user process
+  // notify the other CPU we are up, load interrupt handler, and call scheduler
+  // ??? investigate later
   mpmain();        // finish this processor's setup
 }
 
