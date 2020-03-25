@@ -53,10 +53,17 @@ ideinit(void)
   int i;
 
   initlock(&idelock, "ide");
+  // enable IDE_IRQ interrupt on last CPU
+  // on a two processor system, CPU 1 handles disk interrupts
   ioapicenable(IRQ_IDE, ncpu - 1);
+  // wait for the disk to be able to accept commands
+  // PC motherboard presents status bits of disk hardware on I/O port 0x1f7
   idewait(0);
 
-  // Check if disk 1 is present
+  // assume disk 0 is present, because bootloader and kernel were
+  // both loaded from disk 0
+  // Check if disk 1 is present, write to port 0x1f6 to select disk 1
+  // wait a while fro the status bit
   outb(0x1f6, 0xe0 | (1<<4));
   for(i=0; i<1000; i++){
     if(inb(0x1f7) != 0){
@@ -93,6 +100,8 @@ idestart(struct buf *b)
   outb(0x1f6, 0xe0 | ((b->dev&1)<<4) | ((sector>>24)&0x0f));
   if(b->flags & B_DIRTY){
     outb(0x1f7, write_cmd);
+    // move data to a buffer in the disk controller
+    // disk will raise an interrupt to signal data has been written
     outsl(0x1f0, b->data, BSIZE/4);
   } else {
     outb(0x1f7, read_cmd);
@@ -115,6 +124,8 @@ ideintr(void)
   idequeue = b->qnext;
 
   // Read data if needed.
+  // if buf was being read and the disk controller has data waiting, 
+  // reads data from a buffer in the disk controller
   if(!(b->flags & B_DIRTY) && idewait(1) >= 0)
     insl(0x1f0, b->data, BSIZE/4);
 
@@ -134,6 +145,8 @@ ideintr(void)
 // Sync buf with disk.
 // If B_DIRTY is set, write buf to disk, clear B_DIRTY, set B_VALID.
 // Else if B_VALID is not set, read buf from disk, set B_VALID.
+// maintain a list of pending disk requests and use interrupts to
+// find out when each request has finished
 void
 iderw(struct buf *b)
 {
@@ -148,13 +161,15 @@ iderw(struct buf *b)
 
   acquire(&idelock);  //DOC:acquire-lock
 
+  // invariant is that buffer at the front of the queue has been 
+  // sent to the disk hardware
   // Append b to idequeue.
   b->qnext = 0;
   for(pp=&idequeue; *pp; pp=&(*pp)->qnext)  //DOC:insert-queue
     ;
   *pp = b;
 
-  // Start disk if necessary.
+  // Start disk if necessary. (b is at the front of the queue)
   if(idequeue == b)
     idestart(b);
 
