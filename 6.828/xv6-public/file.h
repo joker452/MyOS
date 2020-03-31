@@ -1,3 +1,5 @@
+// represents a open file
+// wrapper around inode or pipe
 struct file {
   enum { FD_NONE, FD_PIPE, FD_INODE } type;
   int ref; // reference count
@@ -10,6 +12,10 @@ struct file {
 
 
 // in-memory copy of an inode
+// kernel store inode in memory only if there are C pointers referring to it
+// main job is synchronizing access by multiple processes;
+// caching is secondary
+// write-through, code modifies this cache must immediately write it to disk with iupdate
 struct inode {
   uint dev;           // Device number
   uint inum;          // Inode number
@@ -20,7 +26,7 @@ struct inode {
   short type;         // copy of disk inode
   short major;
   short minor;
-  short nlink;
+  short nlink;        // number of dir refer to the file
   uint size;
   uint addrs[NDIRECT+1];
 };

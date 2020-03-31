@@ -27,12 +27,12 @@ struct superblock {
 
 // On-disk inode structure
 struct dinode {
-  short type;           // File type
+  short type;           // File type: file, dir, special files (devices), 0 means free
   short major;          // Major device number (T_DEV only)
   short minor;          // Minor device number (T_DEV only)
   short nlink;          // Number of links to inode in file system
   uint size;            // Size of file (bytes)
-  uint addrs[NDIRECT+1];   // Data block addresses
+  uint addrs[NDIRECT+1];   // Data block addresses, last one is indirect block
 };
 
 // Inodes per block.
@@ -50,6 +50,9 @@ struct dinode {
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14
 
+// inode number and name
+// if name is shorter than DIRSIZ, then it's terminated by a NUL byte
+// directory entries with inode number 0 are free
 struct dirent {
   ushort inum;
   char name[DIRSIZ];

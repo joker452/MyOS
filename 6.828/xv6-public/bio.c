@@ -43,7 +43,7 @@ binit(void)
   initlock(&bcache.lock, "bcache");
 
 //PAGEBREAK!
-  // Create linked list of buffers
+  // Create doubly-linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
@@ -66,6 +66,7 @@ bget(uint dev, uint blockno)
   acquire(&bcache.lock);
 
   // Is the block already cached?
+  // scan forward to utilize possibly locality of reference
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
@@ -75,13 +76,18 @@ bget(uint dev, uint blockno)
     }
   }
 
+  // scan backward to utilize possibly locality of reference
   // Not cached; recycle an unused buffer.
   // Even if refcnt==0, B_DIRTY indicates a buffer is in use
   // because log.c has modified it but not yet committed it.
+  // recycle one that is least recently used
+  // look for a buffer that is not locked and not dirty
   for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
     if(b->refcnt == 0 && (b->flags & B_DIRTY) == 0) {
+      // record new device and sector number
       b->dev = dev;
       b->blockno = blockno;
+      // clear flag
       b->flags = 0;
       b->refcnt = 1;
       release(&bcache.lock);
@@ -126,6 +132,7 @@ brelse(struct buf *b)
   releasesleep(&b->lock);
 
   acquire(&bcache.lock);
+  // head is most recently used, tail is the opposite
   b->refcnt--;
   if (b->refcnt == 0) {
     // no one is waiting for it.

@@ -121,9 +121,11 @@ sys_link(void)
   char name[DIRSIZ], *new, *old;
   struct inode *dp, *ip;
 
+  // fetch args
   if(argstr(0, &old) < 0 || argstr(1, &new) < 0)
     return -1;
 
+  // old exists and not a dir
   begin_op();
   if((ip = namei(old)) == 0){
     end_op();
@@ -144,6 +146,7 @@ sys_link(void)
   if((dp = nameiparent(new, name)) == 0)
     goto bad;
   ilock(dp);
+  // new parent dir must exist and be on the same device as the existing node
   if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){
     iunlockput(dp);
     goto bad;
@@ -238,6 +241,8 @@ bad:
   return -1;
 }
 
+// create a new name for a new inode
+// generalization of open, mkdir and mkdev
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
@@ -248,9 +253,11 @@ create(char *path, short type, short major, short minor)
     return 0;
   ilock(dp);
 
+  // name exists, behavior depends on syscall
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
+    // syscall is open and name is a regular file
     if(type == T_FILE && ip->type == T_FILE)
       return ip;
     iunlockput(ip);
@@ -259,7 +266,8 @@ create(char *path, short type, short major, short minor)
 
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
-
+  
+  // ip is freshly allocated, so no deadlock
   ilock(ip);
   ip->major = major;
   ip->minor = minor;
@@ -307,6 +315,7 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+    // dir open for reading, not writing
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -314,6 +323,7 @@ sys_open(void)
     }
   }
 
+  // allocate file and file descriptor
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -324,6 +334,8 @@ sys_open(void)
   iunlock(ip);
   end_op();
 
+  // partially initialized file only in current process's table
+  // no other process can access
   f->type = FD_INODE;
   f->ip = ip;
   f->off = 0;

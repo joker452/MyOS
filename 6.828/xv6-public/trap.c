@@ -47,6 +47,8 @@ trap(struct trapframe *tf)
   }
 
   switch(tf->trapno){
+    // sys_sleep may read tick at the same time
+    // use lock to achieve mutual exclusion
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);

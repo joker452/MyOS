@@ -10,6 +10,8 @@
 
 #define PIPESIZE 512
 
+// full buffer: nwrite == nread + PIPESIZE
+// empty buffer: nwrite == nread
 struct pipe {
   struct spinlock lock;
   char data[PIPESIZE];

@@ -167,10 +167,10 @@ struct trapframe {
   ushort padding3;
   ushort ds;
   ushort padding4;
-  uint trapno;
+  uint trapno;  // type of fault
 
   // below here defined by x86 hardware
-  uint err;
+  uint err;     // more detailed reason for fault
   uint eip;
   ushort cs;
   ushort padding5;

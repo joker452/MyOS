@@ -170,11 +170,13 @@ switchuvm(struct proc *p)
                                 sizeof(mycpu()->ts)-1, 0);
   mycpu()->gdt[SEG_TSS].s = 0;
   mycpu()->ts.ss0 = SEG_KDATA << 3;
+  // tells CPU what kernel stack to use
   mycpu()->ts.esp0 = (uint)p->kstack + KSTACKSIZE;
   // setting IOPL=0 in eflags *and* iomb beyond the tss segment limit
   // forbids I/O instructions (e.g., inb and outb) from user space
   mycpu()->ts.iomb = (ushort) 0xFFFF;
   ltr(SEG_TSS << 3);
+  // tells kernel what page table to use
   lcr3(V2P(p->pgdir));  // switch to process's address space
   popcli();
 }

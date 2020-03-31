@@ -115,7 +115,7 @@ write_head(void)
 static void
 recover_from_log(void)
 {
-  read_head();
+  read_head();     // read log header
   install_trans(); // if committed, copy from log to disk
   log.lh.n = 0;
   write_head(); // clear the log
@@ -133,6 +133,8 @@ begin_op(void)
       // this op might exhaust log space; wait for commit.
       sleep(&log, &log.lock);
     } else {
+      // reserves space and prevents a commit from occuring during this syscall
+      // conservatively assumes that each syscall might write up to MAXOPBLOCKS distinct blocks
       log.outstanding += 1;
       release(&log.lock);
       break;
@@ -151,6 +153,8 @@ end_op(void)
   log.outstanding -= 1;
   if(log.committing)
     panic("log.committing");
+
+    // commit if count becomes 0
   if(log.outstanding == 0){
     do_commit = 1;
     log.committing = 1;
@@ -195,9 +199,11 @@ commit()
   if (log.lh.n > 0) {
     write_log();     // Write modified blocks from cache to log
     write_head();    // Write header to disk -- the real commit
-    install_trans(); // Now install writes to home locations
+    install_trans(); // Now install writes to proper place in the file system
     log.lh.n = 0;
     write_head();    // Erase the transaction from the log
+    // must happen before next transaction, otherwise there is
+    // inconsistence between count and logged block
   }
 }
 
@@ -221,10 +227,16 @@ log_write(struct buf *b)
     panic("log_write outside of trans");
 
   acquire(&log.lock);
+  // block is written multiple times during a single transaction
+  // allocate the same slot in log
+  // it's common to have a single disk block containing inodes of several files
+  // written multiple times within a single transaction
+  // absorbtion saves log space
   for (i = 0; i < log.lh.n; i++) {
     if (log.lh.block[i] == b->blockno)   // log absorbtion
       break;
   }
+  // record block's sector number in memory
   log.lh.block[i] = b->blockno;
   if (i == log.lh.n)
     log.lh.n++;

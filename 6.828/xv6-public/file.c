@@ -83,6 +83,7 @@ fileclose(struct file *f)
 int
 filestat(struct file *f, struct stat *st)
 {
+  // only allowed on file type FD_INODE
   if(f->type == FD_INODE){
     ilock(f->ip);
     stati(f->ip, st);
@@ -104,6 +105,7 @@ fileread(struct file *f, char *addr, int n)
     return piperead(f->pipe, addr, n);
   if(f->type == FD_INODE){
     ilock(f->ip);
+    // use offset in struct and advance it
     if((r = readi(f->ip, addr, f->off, n)) > 0)
       f->off += r;
     iunlock(f->ip);

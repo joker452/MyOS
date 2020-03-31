@@ -53,6 +53,7 @@ bzero(int dev, int bno)
 // Blocks.
 
 // Allocate a zeroed disk block.
+// must be called inside a transaction
 static uint
 balloc(uint dev)
 {
@@ -60,6 +61,8 @@ balloc(uint dev)
   struct buf *bp;
 
   bp = 0;
+  // outer loop checks each block of bitmap bits
+  // inner loop checks all BPB bits in a single bitmap block
   for(b = 0; b < sb.size; b += BPB){
     bp = bread(dev, BBLOCK(b, sb));
     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
@@ -78,6 +81,7 @@ balloc(uint dev)
 }
 
 // Free a disk block.
+// must be called inside a transaction
 static void
 bfree(int dev, uint b)
 {
@@ -238,6 +242,7 @@ iupdate(struct inode *ip)
 // Find the inode with number inum on device dev
 // and return the in-memory copy. Does not lock
 // the inode and does not read it from disk.
+// non-exclusive access to an inode
 static struct inode*
 iget(uint dev, uint inum)
 {
@@ -266,6 +271,8 @@ iget(uint dev, uint inum)
   ip->inum = inum;
   ip->ref = 1;
   ip->valid = 0;
+  // release lock, let caller get lock later if needed
+  // avoid deadlock
   release(&icache.lock);
 
   return ip;
@@ -375,6 +382,7 @@ bmap(struct inode *ip, uint bn)
   uint addr, *a;
   struct buf *bp;
 
+  // addr in direct block
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
@@ -537,6 +545,8 @@ dirlookup(struct inode *dp, char *name, uint *poff)
       continue;
     if(namecmp(name, de.name) == 0){
       // entry matches path element
+      // byte offset of the entry within the directory
+      // in case the caller wishes to edit it
       if(poff)
         *poff = off;
       inum = de.inum;
@@ -621,17 +631,23 @@ skipelem(char *path, char *name)
 // If parent != 0, return the inode for the parent and copy the final
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
+// may take a long time
+// lock each dir in the path separately so that lookups in different dirs
+// can proceed in parallel
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
   struct inode *ip, *next;
 
+  // determine where path begins
   if(*path == '/')
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);
 
+  // consider each element of the path in turn
   while((path = skipelem(path, name)) != 0){
+    // until ilock runs, ip->type is not guaranteed to have been loaded from disk
     ilock(ip);
     if(ip->type != T_DIR){
       iunlockput(ip);
@@ -646,6 +662,8 @@ namex(char *path, int nameiparent, char *name)
       iunlockput(ip);
       return 0;
     }
+    // if next points to ip
+    // lock next before release ip may result in deadlock
     iunlockput(ip);
     ip = next;
   }
@@ -656,6 +674,7 @@ namex(char *path, int nameiparent, char *name)
   return ip;
 }
 
+/* return corresponding inode */
 struct inode*
 namei(char *path)
 {
@@ -663,6 +682,7 @@ namei(char *path)
   return namex(path, 0, name);
 }
 
+/* return inode of parent dir and copy final element into name */
 struct inode*
 nameiparent(char *path, char *name)
 {
