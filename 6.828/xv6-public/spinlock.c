@@ -108,8 +108,10 @@ pushcli(void)
 
   eflags = readeflags();
   cli();
-  if(mycpu()->ncli == 0)
+  if(mycpu()->ncli == 0) {
+    // record previous state
     mycpu()->intena = eflags & FL_IF;
+  }
   mycpu()->ncli += 1;
 }
 
