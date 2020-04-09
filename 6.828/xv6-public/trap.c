@@ -61,6 +61,26 @@ trap(struct trapframe *tf)
       wakeup(&ticks);
       release(&tickslock);
     }
+
+    // if there is a process running and the timer interrupt comes from user space
+    if (myproc() != 0 && (tf->cs & 3) == 3) {
+      if (myproc()->ticks > 0 && myproc()->handler != 0) {
+        // interval expires, invoke handler
+        if (++myproc()->t == myproc()->ticks) {
+          myproc()->t = 0;
+
+          if (tf->esp < KERNBASE && ((uint) myproc()->handler < myproc()->sz)) {
+            // push original return address on stack
+            tf->esp -= 4;
+            *(uint*) (tf->esp) = tf->eip;
+            // change return address to handler
+            tf->eip = (uint) myproc()->handler;
+          }
+          
+        }
+      }
+    }
+
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:

@@ -49,6 +49,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files, same struct file may appear multiple times
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int ticks;                   // interval in ticks for syscall "alarm"
+  void (*handler)();           // function pointer for syscall "alarm"
+  int t;                       // ticks already passed
 };
 
 // Process memory is laid out contiguously, low addresses first:

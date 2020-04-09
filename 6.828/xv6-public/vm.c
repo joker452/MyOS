@@ -175,6 +175,7 @@ switchuvm(struct proc *p)
   // setting IOPL=0 in eflags *and* iomb beyond the tss segment limit
   // forbids I/O instructions (e.g., inb and outb) from user space
   mycpu()->ts.iomb = (ushort) 0xFFFF;
+  // load task register
   ltr(SEG_TSS << 3);
   // tells kernel what page table to use
   lcr3(V2P(p->pgdir));  // switch to process's address space
