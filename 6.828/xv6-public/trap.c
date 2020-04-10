@@ -63,7 +63,7 @@ trap(struct trapframe *tf)
     }
 
     // if there is a process running and the timer interrupt comes from user space
-    if (myproc() != 0 && (tf->cs & 3) == 3) {
+    if (myproc() != 0 && (tf->cs & 3) == DPL_USER) {
       if (myproc()->ticks > 0 && myproc()->handler != 0) {
         // interval expires, invoke handler
         if (++myproc()->t == myproc()->ticks) {

@@ -144,7 +144,6 @@ vectors.S: vectors.pl
 	./vectors.pl > vectors.S
 
 ULIB = ulib.o usys.o printf.o umalloc.o
-
 # specify main as entry point
 # locate text section at address 0
 # $@ is the target file
@@ -155,7 +154,6 @@ ULIB = ulib.o usys.o printf.o umalloc.o
 # it deletes first line and line with "SYMBOL TABLE"
 # replaces text like "00000756 l    d  .rodata	00000000 .rodata" with 00000756 .rodata
 # deletes $ ($$ escape $ in Makefile)
-
 _%: %.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
 	$(OBJDUMP) -S $@ > $*.asm
