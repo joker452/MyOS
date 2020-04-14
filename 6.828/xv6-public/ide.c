@@ -13,13 +13,13 @@
 #include "fs.h"
 #include "buf.h"
 
-#define SECTOR_SIZE   512
-#define IDE_BSY       0x80
-#define IDE_DRDY      0x40
-#define IDE_DF        0x20
-#define IDE_ERR       0x01
+#define SECTOR_SIZE 512
+#define IDE_BSY 0x80
+#define IDE_DRDY 0x40
+#define IDE_DF 0x20
+#define IDE_ERR 0x01
 
-#define IDE_CMD_READ  0x20
+#define IDE_CMD_READ 0x20
 #define IDE_CMD_WRITE 0x30
 #define IDE_CMD_RDMUL 0xc4
 #define IDE_CMD_WRMUL 0xc5
@@ -32,7 +32,7 @@ static struct spinlock idelock;
 static struct buf *idequeue;
 
 static int havedisk1;
-static void idestart(struct buf*);
+static void idestart(struct buf *);
 
 // Wait for IDE disk to become ready.
 static int
@@ -40,15 +40,14 @@ idewait(int checkerr)
 {
   int r;
 
-  while(((r = inb(0x1f7)) & (IDE_BSY|IDE_DRDY)) != IDE_DRDY)
+  while (((r = inb(0x1f7)) & (IDE_BSY | IDE_DRDY)) != IDE_DRDY)
     ;
-  if(checkerr && (r & (IDE_DF|IDE_ERR)) != 0)
+  if (checkerr && (r & (IDE_DF | IDE_ERR)) != 0)
     return -1;
   return 0;
 }
 
-void
-ideinit(void)
+void ideinit(void)
 {
   int i;
 
@@ -64,70 +63,75 @@ ideinit(void)
   // both loaded from disk 0
   // Check if disk 1 is present, write to port 0x1f6 to select disk 1
   // wait a while fro the status bit
-  outb(0x1f6, 0xe0 | (1<<4));
-  for(i=0; i<1000; i++){
-    if(inb(0x1f7) != 0){
+  outb(0x1f6, 0xe0 | (1 << 4));
+  for (i = 0; i < 1000; i++)
+  {
+    if (inb(0x1f7) != 0)
+    {
       havedisk1 = 1;
       break;
     }
   }
 
   // Switch back to disk 0.
-  outb(0x1f6, 0xe0 | (0<<4));
+  outb(0x1f6, 0xe0 | (0 << 4));
 }
 
 // Start the request for b.  Caller must hold idelock.
-static void
-idestart(struct buf *b)
+static void idestart(struct buf *b)
 {
-  if(b == 0)
+  if (b == 0)
     panic("idestart");
-  if(b->blockno >= FSSIZE)
+  if (b->blockno >= FSSIZE)
     panic("incorrect blockno");
-  int sector_per_block =  BSIZE/SECTOR_SIZE;
+  int sector_per_block = BSIZE / SECTOR_SIZE;
   int sector = b->blockno * sector_per_block;
-  int read_cmd = (sector_per_block == 1) ? IDE_CMD_READ :  IDE_CMD_RDMUL;
+  int read_cmd = (sector_per_block == 1) ? IDE_CMD_READ : IDE_CMD_RDMUL;
   int write_cmd = (sector_per_block == 1) ? IDE_CMD_WRITE : IDE_CMD_WRMUL;
 
-  if (sector_per_block > 7) panic("idestart");
+  if (sector_per_block > 7)
+    panic("idestart");
 
   idewait(0);
-  outb(0x3f6, 0);  // generate interrupt
-  outb(0x1f2, sector_per_block);  // number of sectors
+  outb(0x3f6, 0);                // generate interrupt
+  outb(0x1f2, sector_per_block); // number of sectors
   outb(0x1f3, sector & 0xff);
   outb(0x1f4, (sector >> 8) & 0xff);
   outb(0x1f5, (sector >> 16) & 0xff);
-  outb(0x1f6, 0xe0 | ((b->dev&1)<<4) | ((sector>>24)&0x0f));
-  if(b->flags & B_DIRTY){
+  outb(0x1f6, 0xe0 | ((b->dev & 1) << 4) | ((sector >> 24) & 0x0f));
+  if (b->flags & B_DIRTY)
+  {
     outb(0x1f7, write_cmd);
     // move data to a buffer in the disk controller
     // disk will raise an interrupt to signal data has been written
-    outsl(0x1f0, b->data, BSIZE/4);
-  } else {
+    outsl(0x1f0, b->data, BSIZE / 4);
+  }
+  else
+  {
     outb(0x1f7, read_cmd);
   }
 }
 
 // Interrupt handler.
-void
-ideintr(void)
+void ideintr(void)
 {
   struct buf *b;
 
   // First queued buffer is the active request.
   acquire(&idelock);
 
-  if((b = idequeue) == 0){
+  if ((b = idequeue) == 0)
+  {
     release(&idelock);
     return;
   }
   idequeue = b->qnext;
 
   // Read data if needed.
-  // if buf was being read and the disk controller has data waiting, 
+  // if buf was being read and the disk controller has data waiting,
   // reads data from a buffer in the disk controller
-  if(!(b->flags & B_DIRTY) && idewait(1) >= 0)
-    insl(0x1f0, b->data, BSIZE/4);
+  if (!(b->flags & B_DIRTY) && idewait(1) >= 0)
+    insl(0x1f0, b->data, BSIZE / 4);
 
   // Wake process waiting for this buf.
   b->flags |= B_VALID;
@@ -135,7 +139,7 @@ ideintr(void)
   wakeup(b);
 
   // Start disk on next buf in queue.
-  if(idequeue != 0)
+  if (idequeue != 0)
     idestart(idequeue);
 
   release(&idelock);
@@ -147,37 +151,39 @@ ideintr(void)
 // Else if B_VALID is not set, read buf from disk, set B_VALID.
 // maintain a list of pending disk requests and use interrupts to
 // find out when each request has finished
-void
-iderw(struct buf *b)
+void iderw(struct buf *b)
 {
   struct buf **pp;
 
-  if(!holdingsleep(&b->lock))
+  if (!holdingsleep(&b->lock))
     panic("iderw: buf not locked");
-  if((b->flags & (B_VALID|B_DIRTY)) == B_VALID)
+  if ((b->flags & (B_VALID | B_DIRTY)) == B_VALID)
     panic("iderw: nothing to do");
-  if(b->dev != 0 && !havedisk1)
+  if (b->dev != 0 && !havedisk1)
     panic("iderw: ide disk 1 not present");
 
-  acquire(&idelock);  //DOC:acquire-lock
+  // if doesn't turn off interrupts, then after acquire idelock
+  // ideintr may call acquire again, which leads to deadlock
+  // interrupt may still occur on other processors, but this will not lead to deadlock
+  acquire(&idelock); //DOC:acquire-lock
 
-  // invariant is that buffer at the front of the queue has been 
+  // invariant is that buffer at the front of the queue has been
   // sent to the disk hardware
   // Append b to idequeue.
   b->qnext = 0;
-  for(pp=&idequeue; *pp; pp=&(*pp)->qnext)  //DOC:insert-queue
+  for (pp = &idequeue; *pp; pp = &(*pp)->qnext) //DOC:insert-queue
     ;
   *pp = b;
 
   // Start disk if necessary. (b is at the front of the queue)
-  if(idequeue == b)
+  if (idequeue == b)
     idestart(b);
 
   // Wait for request to finish.
-  while((b->flags & (B_VALID|B_DIRTY)) != B_VALID){
+  while ((b->flags & (B_VALID | B_DIRTY)) != B_VALID)
+  {
     sleep(b, &idelock);
   }
-
 
   release(&idelock);
 }
