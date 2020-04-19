@@ -17,6 +17,7 @@ swtch:
   pushl %esi
   pushl %edi
 
+  # Save stack pointer to old
   # Switch stacks
   movl %esp, (%eax)
   movl %edx, %esp
