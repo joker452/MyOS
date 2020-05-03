@@ -38,17 +38,21 @@ void trap(struct trapframe *tf)
   uint va, a;
   char *mem;
   struct proc *curproc;
+
+  // syscall
   if (tf->trapno == T_SYSCALL)
   {
     if (myproc()->killed)
       exit();
     myproc()->tf = tf;
     syscall();
-    if (myproc()->killed)
+    if (myproc()->killed) {
       exit();
+    }
     return;
   }
 
+  // interrupt
   switch (tf->trapno)
   {
     // sys_sleep may read tick at the same time
@@ -94,10 +98,12 @@ void trap(struct trapframe *tf)
     // Bochs generates spurious IDE1 interrupts.
     break;
   case T_IRQ0 + IRQ_KBD:
+  // keyboard
     kbdintr();
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_COM1:
+  // uart
     uartintr();
     lapiceoi();
     break;
@@ -121,6 +127,7 @@ void trap(struct trapframe *tf)
     /* handle lazy page allocation page fault */
     if (tf->trapno == T_PGFLT)
     {
+      // get page fault virtual address
       va = rcr2();
       if (va + PGSIZE < KERNBASE && va + PGSIZE >= va)
       {

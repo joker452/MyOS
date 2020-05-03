@@ -1,6 +1,6 @@
 // Per-CPU state
 struct cpu {
-  uchar apicid;                // Local APIC ID
+  uchar apicid;                // Local APIC ID, processor's unique hardware identifier
   struct context *scheduler;   // swtch() here to enter scheduler, per CPU storage for context
   struct taskstate ts;         // Used by x86 to find stack for interrupt
   struct segdesc gdt[NSEGS];   // x86 global descriptor table

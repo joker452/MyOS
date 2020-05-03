@@ -235,11 +235,12 @@ exit(void)
   struct proc *p;
   int fd;
 
-  if(curproc == initproc)
+  if(curproc == initproc) {
     panic("init exiting");
+  }
 
   // Close all open files.
-  for(fd = 0; fd < NOFILE; fd++){
+  for(fd = 0; fd < NOFILE; fd++) {
     if(curproc->ofile[fd]){
       fileclose(curproc->ofile[fd]);
       curproc->ofile[fd] = 0;
@@ -354,6 +355,9 @@ scheduler(void)
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
+    
+    // For special case when this CPU cannot find a RUNNABLE process
+    // must release lock to allow other CPU run who may potentially mark a process as RUNNABLE
     release(&ptable.lock);
 
   }
