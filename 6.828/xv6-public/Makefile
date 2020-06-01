@@ -152,7 +152,7 @@ ULIB = ulib.o usys.o printf.o umalloc.o
 # sed is stream editor
 # "1,/SYMBOL TABLE" is a range address
 # it deletes first line and line with "SYMBOL TABLE"
-# replaces text like "00000756 l    d  .rodata	00000000 .rodata" with 00000756 .rodata
+# replaces text like "00000756 l    d  .rodata	00000000 .rodata" with "00000756 .rodata"
 # deletes $ ($$ escape $ in Makefile)
 _%: %.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
@@ -194,6 +194,7 @@ UPROGS=\
 	_stressfs\
 	_uthread\
 	_usertests\
+	_big\
 	_wc\
 	_zombie\
 
@@ -232,8 +233,10 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
 ifndef CPUS
-CPUS := 2
+CPUS := 1
 endif
+# add for big files
+QEMUEXTRA = -snapshot
 QEMUOPTS = -drive file=fs.img,index=1,media=disk,format=raw -drive file=xv6.img,index=0,media=disk,format=raw -smp $(CPUS) -m 512 $(QEMUEXTRA)
 
 qemu: fs.img xv6.img

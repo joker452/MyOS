@@ -26,7 +26,8 @@
 #include "fs.h"
 #include "buf.h"
 
-struct {
+struct
+{
   struct spinlock lock;
   struct buf buf[NBUF];
 
@@ -35,18 +36,18 @@ struct {
   struct buf head;
 } bcache;
 
-void
-binit(void)
+void binit(void)
 {
   struct buf *b;
 
   initlock(&bcache.lock, "bcache");
 
-//PAGEBREAK!
+  //PAGEBREAK!
   // Create doubly-linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
+  for (b = bcache.buf; b < bcache.buf + NBUF; b++)
+  {
     b->next = bcache.head.next;
     b->prev = &bcache.head;
     initsleeplock(&b->lock, "buffer");
@@ -58,7 +59,7 @@ binit(void)
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
-static struct buf*
+static struct buf *
 bget(uint dev, uint blockno)
 {
   struct buf *b;
@@ -67,8 +68,10 @@ bget(uint dev, uint blockno)
 
   // Is the block already cached?
   // scan forward to utilize possibly locality of reference
-  for(b = bcache.head.next; b != &bcache.head; b = b->next){
-    if(b->dev == dev && b->blockno == blockno){
+  for (b = bcache.head.next; b != &bcache.head; b = b->next)
+  {
+    if (b->dev == dev && b->blockno == blockno)
+    {
       b->refcnt++;
       release(&bcache.lock);
       acquiresleep(&b->lock);
@@ -82,8 +85,10 @@ bget(uint dev, uint blockno)
   // because log.c has modified it but not yet committed it.
   // recycle one that is least recently used
   // look for a buffer that is not locked and not dirty
-  for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
-    if(b->refcnt == 0 && (b->flags & B_DIRTY) == 0) {
+  for (b = bcache.head.prev; b != &bcache.head; b = b->prev)
+  {
+    if (b->refcnt == 0 && (b->flags & B_DIRTY) == 0)
+    {
       // record new device and sector number
       b->dev = dev;
       b->blockno = blockno;
@@ -99,23 +104,23 @@ bget(uint dev, uint blockno)
 }
 
 // Return a locked buf with the contents of the indicated block.
-struct buf*
+struct buf *
 bread(uint dev, uint blockno)
 {
   struct buf *b;
 
   b = bget(dev, blockno);
-  if((b->flags & B_VALID) == 0) {
+  if ((b->flags & B_VALID) == 0)
+  {
     iderw(b);
   }
   return b;
 }
 
 // Write b's contents to disk.  Must be locked.
-void
-bwrite(struct buf *b)
+void bwrite(struct buf *b)
 {
-  if(!holdingsleep(&b->lock))
+  if (!holdingsleep(&b->lock))
     panic("bwrite");
   b->flags |= B_DIRTY;
   iderw(b);
@@ -123,10 +128,9 @@ bwrite(struct buf *b)
 
 // Release a locked buffer.
 // Move to the head of the MRU list.
-void
-brelse(struct buf *b)
+void brelse(struct buf *b)
 {
-  if(!holdingsleep(&b->lock))
+  if (!holdingsleep(&b->lock))
     panic("brelse");
 
   releasesleep(&b->lock);
@@ -134,7 +138,8 @@ brelse(struct buf *b)
   acquire(&bcache.lock);
   // head is most recently used, tail is the opposite
   b->refcnt--;
-  if (b->refcnt == 0) {
+  if (b->refcnt == 0)
+  {
     // no one is waiting for it.
     b->next->prev = b->prev;
     b->prev->next = b->next;
@@ -143,9 +148,8 @@ brelse(struct buf *b)
     bcache.head.next->prev = b;
     bcache.head.next = b;
   }
-  
+
   release(&bcache.lock);
 }
 //PAGEBREAK!
 // Blank page.
-

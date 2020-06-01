@@ -62,6 +62,7 @@ balloc(uint dev)
   bp = 0;
   // outer loop checks each block of bitmap bits
   // inner loop checks all BPB bits in a single bitmap block
+  // 1 bit for 1 block
   for (b = 0; b < sb.size; b += BPB)
   {
     bp = bread(dev, BBLOCK(b, sb));
@@ -385,8 +386,8 @@ void iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint idx, off, addr, *a;
+  struct buf *bp, *bp_imm;
 
   // addr in direct block
   if (bn < NDIRECT)
@@ -409,6 +410,36 @@ bmap(struct inode *ip, uint bn)
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
+    brelse(bp);
+    return addr;
+  }
+
+  bn -= NINDIRECT;
+
+
+  if (bn < NDINDIRECT) 
+  {
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) 
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr);
+
+    // index into singly-indirect blocks
+    idx = bn / NINDIRECT;
+    a = (uint *)bp->data;
+    if ((addr = a[idx]) == 0) 
+    {
+      a[idx] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+
+    bp_imm = bread(ip->dev, addr);
+    off = bn - idx * NINDIRECT;
+    a = (uint *)bp_imm->data;
+    if ((addr = a[off]) == 0) {
+      a[off] = addr = balloc(ip->dev);
+      log_write(bp_imm);
+    }
+    brelse(bp_imm);
     brelse(bp);
     return addr;
   }
@@ -673,12 +704,14 @@ namex(char *path, int nameiparent, char *name)
       iunlockput(ip);
       return 0;
     }
+
     if (nameiparent && *path == '\0')
     {
       // Stop one level early.
       iunlock(ip);
       return ip;
     }
+    
     if ((next = dirlookup(ip, name, 0)) == 0)
     {
       iunlockput(ip);
