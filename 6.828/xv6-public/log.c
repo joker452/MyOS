@@ -5,6 +5,8 @@
 #include "sleeplock.h"
 #include "fs.h"
 #include "buf.h"
+#include "mmu.h"
+#include "proc.h"
 
 // Simple logging that allows concurrent FS system calls.
 //
@@ -31,12 +33,15 @@
 
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
-struct logheader {
-  int n;
+// write header when commit, and set n to zero after writing to file system
+struct logheader
+{
+  int n; // zero if no transaction in log, or non-zero if contains a complete committed transaction with # of logged block
   int block[LOGSIZE];
 };
 
-struct log {
+struct log
+{
   struct spinlock lock;
   int start;
   int size;
@@ -50,8 +55,7 @@ struct log log;
 static void recover_from_log(void);
 static void commit();
 
-void
-initlog(int dev)
+void initlog(int dev)
 {
   if (sizeof(struct logheader) >= BSIZE)
     panic("initlog: too big logheader");
@@ -71,12 +75,19 @@ install_trans(void)
 {
   int tail;
 
-  for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *lbuf = bread(log.dev, log.start+tail+1); // read log block
-    struct buf *dbuf = bread(log.dev, log.lh.block[tail]); // read dst
-    memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
-    bwrite(dbuf);  // write dst to disk
-    brelse(lbuf);
+  for (tail = 0; tail < log.lh.n; tail++)
+  {
+
+    struct buf *dbuf = bread(log.dev, log.lh.block[tail]);   // read dst
+    if (!log.committing) {
+      struct buf *lbuf = bread(log.dev, log.start + tail + 1); // read log block
+      memmove(dbuf->data, lbuf->data, BSIZE);                  // copy block to dst
+      bwrite(dbuf);                                            // write dst to disk
+      brelse(lbuf);
+    } else {
+      bwrite(dbuf);
+    }
+
     brelse(dbuf);
   }
 }
@@ -86,10 +97,11 @@ static void
 read_head(void)
 {
   struct buf *buf = bread(log.dev, log.start);
-  struct logheader *lh = (struct logheader *) (buf->data);
+  struct logheader *lh = (struct logheader *)(buf->data);
   int i;
   log.lh.n = lh->n;
-  for (i = 0; i < log.lh.n; i++) {
+  for (i = 0; i < log.lh.n; i++)
+  {
     log.lh.block[i] = lh->block[i];
   }
   brelse(buf);
@@ -102,10 +114,11 @@ static void
 write_head(void)
 {
   struct buf *buf = bread(log.dev, log.start);
-  struct logheader *hb = (struct logheader *) (buf->data);
+  struct logheader *hb = (struct logheader *)(buf->data);
   int i;
   hb->n = log.lh.n;
-  for (i = 0; i < log.lh.n; i++) {
+  for (i = 0; i < log.lh.n; i++)
+  {
     hb->block[i] = log.lh.block[i];
   }
   bwrite(buf);
@@ -119,20 +132,31 @@ recover_from_log(void)
   install_trans(); // if committed, copy from log to disk
   log.lh.n = 0;
   write_head(); // clear the log
+
+  // code to ignore recovery
+
+  // read_head();
+  // cprintf("recovery: n=%d but ignoring\n", log.lh.n);
+  // log.lh.n = 0;
 }
 
 // called at the start of each FS system call.
-void
-begin_op(void)
+void begin_op(void)
 {
   acquire(&log.lock);
-  while(1){
-    if(log.committing){
+  while (1)
+  {
+    if (log.committing)
+    {
       sleep(&log, &log.lock);
-    } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+    }
+    else if (log.lh.n + (log.outstanding + 1) * MAXOPBLOCKS > LOGSIZE)
+    {
       // this op might exhaust log space; wait for commit.
       sleep(&log, &log.lock);
-    } else {
+    }
+    else
+    {
       // reserves space and prevents a commit from occuring during this syscall
       // conservatively assumes that each syscall might write up to MAXOPBLOCKS distinct blocks
       log.outstanding += 1;
@@ -144,21 +168,23 @@ begin_op(void)
 
 // called at the end of each FS system call.
 // commits if this was the last outstanding operation.
-void
-end_op(void)
+void end_op(void)
 {
   int do_commit = 0;
 
   acquire(&log.lock);
   log.outstanding -= 1;
-  if(log.committing)
+  if (log.committing)
     panic("log.committing");
 
-    // commit if count becomes 0
-  if(log.outstanding == 0){
+  // commit if count becomes 0
+  if (log.outstanding == 0)
+  {
     do_commit = 1;
     log.committing = 1;
-  } else {
+  }
+  else
+  {
     // begin_op() may be waiting for log space,
     // and decrementing log.outstanding has decreased
     // the amount of reserved space.
@@ -166,7 +192,8 @@ end_op(void)
   }
   release(&log.lock);
 
-  if(do_commit){
+  if (do_commit)
+  {
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
     commit();
@@ -183,11 +210,12 @@ write_log(void)
 {
   int tail;
 
-  for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *to = bread(log.dev, log.start+tail+1); // log block
+  for (tail = 0; tail < log.lh.n; tail++)
+  {
+    struct buf *to = bread(log.dev, log.start + tail + 1); // log block
     struct buf *from = bread(log.dev, log.lh.block[tail]); // cache block
     memmove(to->data, from->data, BSIZE);
-    bwrite(to);  // write the log
+    bwrite(to); // write the log
     brelse(from);
     brelse(to);
   }
@@ -196,15 +224,31 @@ write_log(void)
 static void
 commit()
 {
-  if (log.lh.n > 0) {
+  if (log.lh.n > 0)
+  {
     write_log();     // Write modified blocks from cache to log
     write_head();    // Write header to disk -- the real commit
     install_trans(); // Now install writes to proper place in the file system
     log.lh.n = 0;
-    write_head();    // Erase the transaction from the log
+    write_head(); // Erase the transaction from the log
     // must happen before next transaction, otherwise there is
     // inconsistence between count and logged block
   }
+
+  // code to deliberately cause a crash
+
+  // int pid = myproc()->pid;
+  // if (log.lh.n > 0) {
+  //   write_log();
+  //   write_head();
+  //   if (pid > 1)              // suppress this buggy behavior for init, which creates files before the shell starts.
+  //     log.lh.block[0] = 0;
+  //   install_trans();
+  //   if (pid > 1)
+  //     panic("commit mimicking crash");
+  //   log.lh.n = 0;
+  //   write_head();
+  // }
 }
 
 // Caller has modified b->data and is done with the buffer.
@@ -216,8 +260,7 @@ commit()
 //   modify bp->data[]
 //   log_write(bp)
 //   brelse(bp)
-void
-log_write(struct buf *b)
+void log_write(struct buf *b)
 {
   int i;
 
@@ -232,8 +275,9 @@ log_write(struct buf *b)
   // it's common to have a single disk block containing inodes of several files
   // written multiple times within a single transaction
   // absorbtion saves log space
-  for (i = 0; i < log.lh.n; i++) {
-    if (log.lh.block[i] == b->blockno)   // log absorbtion
+  for (i = 0; i < log.lh.n; i++)
+  {
+    if (log.lh.block[i] == b->blockno) // log absorbtion
       break;
   }
   // record block's sector number in memory
@@ -243,4 +287,3 @@ log_write(struct buf *b)
   b->flags |= B_DIRTY; // prevent eviction
   release(&log.lock);
 }
-
